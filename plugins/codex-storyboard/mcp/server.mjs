@@ -1,8 +1,11 @@
 import readline from "node:readline";
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.3.1";
+const SERVER_VERSION = "0.4.0";
 const DEFAULT_URL = "http://127.0.0.1:43218";
+const ASPECT_RATIOS = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -32,16 +35,174 @@ async function requestJson(path, options = {}, args = {}) {
   return text ? JSON.parse(text) : {};
 }
 
-function jsonOptions(body) {
+function jsonOptions(body, method = "POST") {
   return {
-    method: "POST",
+    method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   };
 }
 
+function shotSchema({ requireId = false } = {}) {
+  return {
+    type: "object",
+    properties: {
+      ...(requireId ? { shotId: { type: "string" } } : {}),
+      rollType: { type: "string", enum: ["A-ROLL", "B-ROLL"] },
+      mediaType: { type: "string", enum: ["image", "video"] },
+      duration: { type: "number", minimum: 0 },
+      dialogue: { type: "string" },
+      visualPrompt: { type: "string" },
+      generator: {
+        type: "string",
+        enum: ["manual", "image-gen", "hyperframes", "remotion"]
+      },
+      notes: { type: "string" }
+    },
+    ...(requireId ? { required: ["shotId"] } : {}),
+    additionalProperties: false
+  };
+}
+
+function projectSummary(project) {
+  return {
+    id: project.id,
+    title: project.title,
+    aspectRatio: project.aspectRatio,
+    shotCount: Array.isArray(project.shots) ? project.shots.length : Number(project.shotCount || 0),
+    hasDesign: Boolean(project.hasDesign),
+    duration: project.duration
+  };
+}
+
+async function uploadDesign(projectId, designPath, args) {
+  const content = await readFile(designPath);
+  const form = new FormData();
+  form.append("file", new Blob([content], { type: "text/markdown" }), basename(designPath));
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/design`,
+    { method: "POST", body: form },
+    args
+  );
+}
+
 function tools() {
   return [
+    {
+      name: "list_storyboard_projects",
+      title: "List Storyboard Projects",
+      description: "List local storyboard project summaries, optionally filtered by title.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Optional case-insensitive title search." },
+          storyboardUrl: { type: "string", description: `Storyboard URL. Defaults to ${DEFAULT_URL}.` }
+        },
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
+    {
+      name: "get_storyboard_project",
+      title: "Get Storyboard Project",
+      description: "Get one storyboard project with its complete shot list.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          storyboardUrl: { type: "string" }
+        },
+        required: ["projectId"],
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
+    {
+      name: "create_storyboard_project",
+      title: "Create Storyboard Project",
+      description: "Create a complete storyboard project in one call, including all shots and an optional local DESIGN.md.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          aspectRatio: { type: "string", enum: ASPECT_RATIOS },
+          shots: { type: "array", items: shotSchema() },
+          designPath: {
+            type: "string",
+            description: "Optional absolute path to a local Markdown visual specification."
+          },
+          storyboardUrl: { type: "string" }
+        },
+        required: ["title", "aspectRatio", "shots"],
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    {
+      name: "update_storyboard_project",
+      title: "Update Storyboard Project",
+      description: "Update project metadata, append shots, patch specific shots, delete shots, or replace/remove DESIGN.md in one call.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          title: { type: "string" },
+          aspectRatio: { type: "string", enum: ASPECT_RATIOS },
+          appendShots: { type: "array", items: shotSchema() },
+          shotUpdates: { type: "array", items: shotSchema({ requireId: true }) },
+          deleteShotIds: { type: "array", items: { type: "string" } },
+          designPath: {
+            type: "string",
+            description: "Optional absolute path to a replacement local DESIGN.md."
+          },
+          removeDesign: { type: "boolean" },
+          storyboardUrl: { type: "string" }
+        },
+        required: ["projectId"],
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
+    {
+      name: "delete_storyboard_project",
+      title: "Delete Storyboard Project",
+      description: "Permanently delete a storyboard project and all of its local media.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          storyboardUrl: { type: "string" }
+        },
+        required: ["projectId"],
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      }
+    },
     {
       name: "list_storyboard_generation_tasks",
       title: "List Storyboard Generation Tasks",
@@ -133,6 +294,155 @@ function tools() {
 async function callTool(id, params) {
   const args = params?.arguments ?? {};
 
+  if (params?.name === "list_storyboard_projects") {
+    const result = await requestJson("/api/projects", {}, args);
+    const query = String(args.query || "").trim().toLocaleLowerCase();
+    const projects = result.projects
+      .filter((project) => !query || project.title.toLocaleLowerCase().includes(query))
+      .map(projectSummary);
+    sendResult(id, {
+      content: [{
+        type: "text",
+        text: projects.length === 0
+          ? "No matching storyboard projects."
+          : projects.map((project) =>
+            `${project.id} | ${project.title} | ${project.aspectRatio} | ${project.shotCount} shots`
+          ).join("\n")
+      }],
+      structuredContent: { projects }
+    });
+    return;
+  }
+
+  if (params?.name === "get_storyboard_project") {
+    const project = await requestJson(
+      `/api/projects/${encodeURIComponent(args.projectId)}`,
+      {},
+      args
+    );
+    sendResult(id, {
+      content: [{
+        type: "text",
+        text: `${project.title} | ${project.aspectRatio} | ${project.shots.length} shots`
+      }],
+      structuredContent: { project }
+    });
+    return;
+  }
+
+  if (params?.name === "create_storyboard_project") {
+    let project;
+    try {
+      project = await requestJson(
+        "/api/projects",
+        jsonOptions({ title: args.title, aspectRatio: args.aspectRatio }),
+        args
+      );
+      if (args.shots.length > 0) {
+        project = await requestJson(
+          `/api/projects/${encodeURIComponent(project.id)}/shots`,
+          jsonOptions({ shots: args.shots }),
+          args
+        );
+      }
+      if (args.designPath) project = await uploadDesign(project.id, args.designPath, args);
+    } catch (error) {
+      if (project?.id) {
+        await requestJson(
+          `/api/projects/${encodeURIComponent(project.id)}`,
+          { method: "DELETE" },
+          args
+        ).catch(() => {});
+      }
+      throw error;
+    }
+
+    const summary = projectSummary(project);
+    sendResult(id, {
+      content: [{
+        type: "text",
+        text: `Created ${summary.title} (${summary.aspectRatio}) with ${summary.shotCount} shots. Project ID: ${summary.id}`
+      }],
+      structuredContent: { project: summary }
+    });
+    return;
+  }
+
+  if (params?.name === "update_storyboard_project") {
+    if (args.designPath && args.removeDesign) {
+      throw new Error("designPath and removeDesign cannot be used together");
+    }
+    const project = await requestJson(
+      `/api/projects/${encodeURIComponent(args.projectId)}`,
+      {},
+      args
+    );
+    if (args.title !== undefined) project.title = args.title;
+    if (args.aspectRatio !== undefined) project.aspectRatio = args.aspectRatio;
+
+    const updates = new Map((args.shotUpdates || []).map((shot) => [shot.shotId, shot]));
+    for (const shotId of updates.keys()) {
+      if (!project.shots.some((shot) => shot.id === shotId)) {
+        throw new Error(`Shot not found: ${shotId}`);
+      }
+    }
+    project.shots = project.shots
+      .filter((shot) => !(args.deleteShotIds || []).includes(shot.id))
+      .map((shot) => {
+        const update = updates.get(shot.id);
+        if (!update) return shot;
+        const { shotId, ...fields } = update;
+        return { ...shot, ...fields };
+      });
+    project.shots.push(...(args.appendShots || []));
+
+    let saved = await requestJson(
+      `/api/projects/${encodeURIComponent(project.id)}`,
+      jsonOptions({
+        title: project.title,
+        aspectRatio: project.aspectRatio,
+        shots: project.shots
+      }, "PUT"),
+      args
+    );
+    if (args.designPath) saved = await uploadDesign(saved.id, args.designPath, args);
+    if (args.removeDesign) {
+      saved = await requestJson(
+        `/api/projects/${encodeURIComponent(saved.id)}/design`,
+        { method: "DELETE" },
+        args
+      );
+    }
+
+    const summary = projectSummary(saved);
+    sendResult(id, {
+      content: [{
+        type: "text",
+        text: `Updated ${summary.title} (${summary.aspectRatio}); ${summary.shotCount} shots.`
+      }],
+      structuredContent: { project: summary }
+    });
+    return;
+  }
+
+  if (params?.name === "delete_storyboard_project") {
+    const project = await requestJson(
+      `/api/projects/${encodeURIComponent(args.projectId)}`,
+      {},
+      args
+    );
+    await requestJson(
+      `/api/projects/${encodeURIComponent(args.projectId)}`,
+      { method: "DELETE" },
+      args
+    );
+    sendResult(id, {
+      content: [{ type: "text", text: `Deleted ${project.title} (${project.id}).` }],
+      structuredContent: { deleted: { id: project.id, title: project.title } }
+    });
+    return;
+  }
+
   if (params?.name === "list_storyboard_generation_tasks") {
     const status = encodeURIComponent(args.status || "pending");
     const result = await requestJson(`/api/generation/tasks?status=${status}`, {}, args);
@@ -199,7 +509,7 @@ async function handle(message) {
       capabilities: { tools: {} },
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
       instructions:
-        "Use the storyboard task tools to claim pending tasks, generate assets with the matching Codex skill, and complete or fail each task. Never complete a task before verifying the local output file."
+        "Use project tools to create and manage storyboard projects directly through the local API. Use generation tools to process queued assets. Never edit data files directly or complete a generation task before verifying its output."
     });
     return;
   }

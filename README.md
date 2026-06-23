@@ -9,6 +9,8 @@
 ## 功能
 
 - 多项目管理：新建、重命名、打开和删除项目
+- Codex 可通过 MCP 一次创建完整项目和全部分镜，无需控制浏览器
+- MCP 支持项目查找、读取、修改和删除
 - 支持 `9:16`、`16:9`、`3:4`、`4:3`、`1:1`
 - 分镜表格：台词、画面描述、时长、素材类型和生成方式
 - 图片与视频本地上传
@@ -62,6 +64,12 @@ codex plugin add codex-storyboard@codex-storyboard
 安装后重新打开 Codex 对话，然后输入：
 
 ```text
+创建一个 9:16 的“Codex 侧边栏 5 种用法”分镜项目，直接写入 Codex 分镜台
+```
+
+或者处理素材生成队列：
+
+```text
 处理 Codex 分镜台里所有待生成素材
 ```
 
@@ -73,11 +81,13 @@ codex plugin add codex-storyboard@codex-storyboard
 
 插件会：
 
-1. 读取本地分镜台的待处理任务。
-2. 如果项目配置了 `DESIGN.md`，完整读取并作为统一视觉风格规范。
-3. 根据 `generator` 选择 Image Generation、HyperFrames 或 Remotion。
-4. 使用项目的画面比例和输出尺寸生成素材。
-5. 将最终图片或视频回填到正确项目和镜头。
+1. 根据视频需求生成完整分镜，并通过一次 MCP 调用写入新项目。
+2. 查找、读取、修改或删除已有项目，无需 Browser 或 Computer Use。
+3. 读取本地分镜台的待处理任务。
+4. 如果项目配置了 `DESIGN.md`，完整读取并作为统一视觉风格规范。
+5. 根据 `generator` 选择 Image Generation、HyperFrames 或 Remotion。
+6. 使用项目的画面比例和输出尺寸生成素材。
+7. 将最终图片或视频回填到正确项目和镜头。
 
 > Image Generation、HyperFrames 和 Remotion 是否可用，取决于当前 Codex 环境中已启用的能力和插件。
 
@@ -98,8 +108,26 @@ plugins/codex-storyboard/
 ├── .mcp.json
 ├── mcp/server.mjs
 ├── scripts/start-mcp.sh
-└── skills/process-storyboard-tasks/SKILL.md
+└── skills/
+    ├── manage-storyboard-projects/SKILL.md
+    └── process-storyboard-tasks/SKILL.md
 ```
+
+## Codex 直接创建分镜项目
+
+插件通过 MCP 调用分镜台本地 API，不直接写 `data/`，也不使用浏览器自动化。
+
+支持：
+
+- 列出项目，并按标题查找
+- 读取单个项目和完整镜头
+- 一次创建项目、全部镜头和可选 DESIGN.md
+- 修改项目名称、比例和指定镜头
+- 追加或删除镜头
+- 替换或移除 DESIGN.md
+- 永久删除项目及其本地素材
+
+创建工具只返回项目摘要，完整脚本不会在工具结果中重复输出，从而减少 Token 消耗。
 
 ## 画面比例
 
