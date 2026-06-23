@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Codex 分镜台</title>
+  <script>
+    try {
+      const theme = localStorage.getItem("codex-storyboard-theme");
+      document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light";
+    } catch {
+      document.documentElement.dataset.theme = "light";
+    }
+  </script>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -14,6 +22,9 @@
     </button>
 
     <div id="home-actions" class="header-actions">
+      <button class="theme-toggle" data-theme-toggle type="button" aria-label="切换到深色主题">
+        <span class="theme-icon" aria-hidden="true"></span>
+      </button>
       <button id="create-project" class="primary">＋ 新建项目</button>
     </div>
 
@@ -28,6 +39,9 @@
         <span id="save-status" aria-live="polite">已保存</span>
         <span class="summary-label">总时长</span>
         <strong id="duration-total">0:00</strong>
+        <button class="theme-toggle" data-theme-toggle type="button" aria-label="切换到深色主题">
+          <span class="theme-icon" aria-hidden="true"></span>
+        </button>
         <button id="generate-all" class="secondary">批量生成</button>
         <button id="add-shot-top" class="primary">＋ 新增镜头</button>
       </div>

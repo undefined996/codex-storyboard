@@ -19,6 +19,7 @@ const projectsFile = join(dataDir, "projects.json");
 const legacyDataFile = join(dataDir, "storyboard.json");
 const legacyMediaDir = join(dataDir, "media");
 const port = Number(process.env.PORT || 43218);
+let generationMutationQueue = Promise.resolve();
 
 const aspectRatios = {
   "9:16": { width: 1080, height: 1920 },
@@ -66,7 +67,7 @@ function sendJson(response, status, value) {
 }
 
 function sendError(response, status, message) {
-  sendJson(response, status, { error: message });
+  return sendJson(response, status, { error: message });
 }
 
 async function readBodyBuffer(request, limit = 100 * 1024 * 1024) {
@@ -317,6 +318,12 @@ async function findTask(taskId) {
   return null;
 }
 
+function mutateGenerationTask(callback) {
+  const mutation = generationMutationQueue.then(callback, callback);
+  generationMutationQueue = mutation.catch(() => {});
+  return mutation;
+}
+
 async function migrateLegacyProject() {
   if (await exists(projectsFile)) return;
   if (!(await exists(legacyDataFile))) {
@@ -551,37 +558,53 @@ async function handleGenerationApi(request, response, url) {
     return sendJson(response, 201, { project: saved, queued, skipped });
   }
 
-  const taskMatch = url.pathname.match(/^\/api\/generation\/tasks\/([^/]+)\/(claim|complete|fail)$/);
+  const taskMatch = url.pathname.match(
+    /^\/api\/generation\/tasks\/([^/]+)\/(claim|complete|fail|cancel)$/
+  );
   if (taskMatch && request.method === "POST") {
-    const [, taskId, action] = taskMatch;
-    const found = await findTask(decodeURIComponent(taskId));
-    if (!found) return sendError(response, 404, "Generation task not found");
-    const { project, shot } = found;
-    const body = await readBody(request);
+    return mutateGenerationTask(async () => {
+      const [, taskId, action] = taskMatch;
+      const found = await findTask(decodeURIComponent(taskId));
+      if (!found) return sendError(response, 404, "Generation task not found");
+      const { project, shot } = found;
+      const body = await readBody(request);
 
-    if (action === "claim") {
-      if (shot.generationStatus !== "pending") {
-        return sendError(response, 409, `Task is ${shot.generationStatus}`);
+      if (action === "claim") {
+        if (shot.generationStatus !== "pending") {
+          return sendError(response, 409, `Task is ${shot.generationStatus}`);
+        }
+        shot.generationStatus = "processing";
+        shot.generationStartedAt = new Date().toISOString();
       }
-      shot.generationStatus = "processing";
-      shot.generationStartedAt = new Date().toISOString();
-    }
 
-    if (action === "complete") {
-      if (!body.sourcePath) return sendError(response, 400, "sourcePath is required");
-      await attachMedia(project, shot, body.sourcePath, body.mediaType);
-    }
+      if (action === "complete") {
+        if (!body.sourcePath) return sendError(response, 400, "sourcePath is required");
+        await attachMedia(project, shot, body.sourcePath, body.mediaType);
+      }
 
-    if (action === "fail") {
-      shot.generationStatus = "failed";
-      shot.generationError = String(body.error || "生成失败");
-      shot.generationCompletedAt = new Date().toISOString();
-    }
+      if (action === "fail") {
+        shot.generationStatus = "failed";
+        shot.generationError = String(body.error || "生成失败");
+        shot.generationCompletedAt = new Date().toISOString();
+      }
 
-    const saved = await saveProject(project);
-    return sendJson(response, 200, {
-      project: saved,
-      task: generationTask(saved, saved.shots.find((item) => item.id === shot.id))
+      if (action === "cancel") {
+        if (shot.generationStatus !== "pending") {
+          return sendError(response, 409, `Task is ${shot.generationStatus}`);
+        }
+        shot.generationStatus = shot.mediaUrl ? "ready" : "idle";
+        shot.generationTaskId = "";
+        shot.generationError = "";
+        shot.generationRequestedAt = null;
+        shot.generationStartedAt = null;
+        shot.generationCompletedAt = shot.mediaUrl ? shot.generationCompletedAt : null;
+      }
+
+      const saved = await saveProject(project);
+      return sendJson(response, 200, {
+        project: saved,
+        task: generationTask(saved, saved.shots.find((item) => item.id === shot.id))
+      });
     });
   }
 

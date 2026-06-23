@@ -17,6 +17,8 @@ const mediaUpload = document.querySelector("#media-upload");
 const lightbox = document.querySelector("#lightbox");
 const lightboxStage = document.querySelector("#lightbox-stage");
 const toast = document.querySelector("#toast");
+const themeButtons = document.querySelectorAll("[data-theme-toggle]");
+const themeStorageKey = "codex-storyboard-theme";
 
 const ratios = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const selectOptions = {
@@ -53,8 +55,35 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData)) headers["content-type"] = "application/json";
   const response = await fetch(path, { ...options, headers });
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || "请求失败");
+  if (!response.ok) {
+    const error = new Error(value.error || "请求失败");
+    error.status = response.status;
+    throw error;
+  }
   return value;
+}
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function updateThemeButtons() {
+  const isDark = currentTheme() === "dark";
+  themeButtons.forEach((button) => {
+    button.setAttribute("aria-label", isDark ? "切换到浅色主题" : "切换到深色主题");
+    button.title = isDark ? "切换到浅色主题" : "切换到深色主题";
+  });
+}
+
+function toggleTheme() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem(themeStorageKey, next);
+  } catch {
+    // 浏览器禁用本地存储时，本次切换仍然生效。
+  }
+  updateThemeButtons();
 }
 
 function showToast(message, type = "info") {
@@ -100,7 +129,7 @@ function generationLabel(shot) {
 function generationButtonLabel(shot) {
   if (shot.generator === "manual") return shot.mediaUrl ? "重新上传" : "本地上传";
   if (shot.generationStatus === "ready" || shot.generationStatus === "failed") return "重新生成";
-  if (shot.generationStatus === "pending") return "已加入队列";
+  if (shot.generationStatus === "pending") return "取消队列";
   if (shot.generationStatus === "processing") return "生成中";
   return "生成素材";
 }
@@ -483,9 +512,11 @@ function renderStoryboard() {
 
     const generateButton = row.querySelector(".generate-shot");
     generateButton.textContent = generationButtonLabel(shot);
-    generateButton.disabled = ["pending", "processing"].includes(shot.generationStatus);
+    generateButton.disabled = shot.generationStatus === "processing";
+    generateButton.dataset.action = shot.generationStatus === "pending" ? "cancel" : "generate";
     generateButton.addEventListener("click", () => {
       if (shot.generator === "manual") return chooseUpload(shot.id);
+      if (shot.generationStatus === "pending") return cancelGeneration(shot);
       return queueGeneration(
         [shot.id],
         shot.generationStatus === "ready" || shot.generationStatus === "failed"
@@ -512,6 +543,29 @@ function renderStoryboard() {
   );
   generateAllButton.disabled = eligible.length === 0;
   generateAllButton.textContent = eligible.length > 0 ? `批量生成 ${eligible.length}` : "批量生成";
+}
+
+async function cancelGeneration(shot) {
+  saveStatus.textContent = "取消生成任务…";
+  try {
+    const result = await api(
+      `/api/generation/tasks/${encodeURIComponent(shot.generationTaskId)}/cancel`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+    project = result.project;
+    saveStatus.textContent = "已取消生成任务";
+    renderStoryboard();
+  } catch (error) {
+    project = await api(`/api/projects/${encodeURIComponent(project.id)}`);
+    renderStoryboard();
+    if (error.status === 409) {
+      saveStatus.textContent = "任务已开始生成";
+      showToast("任务已被 Codex 领取，无法取消", "error");
+      return;
+    }
+    saveStatus.textContent = "取消失败";
+    showToast(error.message, "error");
+  }
 }
 
 async function queueGeneration(shotIds, force = false) {
@@ -559,7 +613,9 @@ function startPolling() {
 }
 
 renderRatioOptions();
+updateThemeButtons();
 
+themeButtons.forEach((button) => button.addEventListener("click", toggleTheme));
 document.querySelector("#create-project").addEventListener("click", () => openProjectDialog("create"));
 document.querySelector("#brand-home").addEventListener("click", () => navigate("/"));
 document.querySelector("#back-home").addEventListener("click", () => navigate("/"));
