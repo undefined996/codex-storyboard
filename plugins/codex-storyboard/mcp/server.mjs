@@ -1,7 +1,7 @@
 import readline from "node:readline";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.3.0";
+const SERVER_VERSION = "0.3.1";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 
 const JsonRpcError = {

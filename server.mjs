@@ -8,7 +8,7 @@ import {
   stat,
   writeFile
 } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
@@ -405,7 +405,9 @@ async function serveFile(response, filePath, allowedRoots = [publicDir]) {
   const normalized = resolve(filePath);
   const allowed = allowedRoots.some((base) => {
     const normalizedBase = resolve(base);
-    return normalized === normalizedBase || normalized.startsWith(`${normalizedBase}/`);
+    const relativePath = relative(normalizedBase, normalized);
+    return relativePath === "" ||
+      (!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`));
   });
   if (!allowed) return sendError(response, 403, "Forbidden");
 
