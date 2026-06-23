@@ -14,10 +14,6 @@
 
 ![Codex Storyboard 分镜工作台](docs/assets/codex-storyboard-workspace.png)
 
-### 产品宣传视频
-
-[点击观看 Codex Storyboard 产品宣传视频](docs/assets/codex-storyboard-promo.mp4)
-
 ## 功能
 
 - 多项目管理：新建、重命名、打开和删除项目
