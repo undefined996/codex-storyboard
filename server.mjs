@@ -148,6 +148,7 @@ function normalizeProject(project = {}) {
     id: String(project.id || createId("project")),
     title: String(project.title || "未命名项目").trim() || "未命名项目",
     aspectRatio: normalizeAspectRatio(project.aspectRatio),
+    hasDesign: Boolean(project.hasDesign),
     shots: Array.isArray(project.shots) ? project.shots.map(normalizeShot) : [],
     createdAt: project.createdAt || now,
     updatedAt: project.updatedAt || now
@@ -166,6 +167,10 @@ function projectMediaDir(projectId) {
   return join(projectDir(projectId), "media");
 }
 
+function projectDesignFile(projectId) {
+  return join(projectDir(projectId), "DESIGN.md");
+}
+
 async function readProjectsIndex() {
   return JSON.parse(await readFile(projectsFile, "utf8"));
 }
@@ -178,7 +183,9 @@ async function saveProjectsIndex(index) {
 async function readProject(projectId) {
   if (!safeId(projectId)) throw Object.assign(new Error("Project not found"), { status: 404 });
   try {
-    return normalizeProject(JSON.parse(await readFile(projectFile(projectId), "utf8")));
+    const project = normalizeProject(JSON.parse(await readFile(projectFile(projectId), "utf8")));
+    project.hasDesign = await exists(projectDesignFile(projectId));
+    return project;
   } catch (error) {
     if (error.code === "ENOENT") throw Object.assign(new Error("Project not found"), { status: 404 });
     throw error;
@@ -188,6 +195,7 @@ async function readProject(projectId) {
 async function saveProject(project) {
   const next = normalizeProject({ ...project, updatedAt: new Date().toISOString() });
   await mkdir(projectMediaDir(next.id), { recursive: true });
+  next.hasDesign = await exists(projectDesignFile(next.id));
   await writeFile(projectFile(next.id), `${JSON.stringify(next, null, 2)}\n`, "utf8");
 
   const index = await readProjectsIndex();
@@ -195,6 +203,7 @@ async function saveProject(project) {
     id: next.id,
     title: next.title,
     aspectRatio: next.aspectRatio,
+    hasDesign: next.hasDesign,
     createdAt: next.createdAt,
     updatedAt: next.updatedAt
   };
@@ -222,12 +231,14 @@ async function projectSummary(record) {
     ...record,
     shotCount: project.shots.length,
     duration,
-    coverUrl: cover
+    coverUrl: cover,
+    hasDesign: project.hasDesign
   };
 }
 
 function generationTask(project, shot) {
   const dimensions = aspectRatios[project.aspectRatio];
+  const taskOutputDir = resolve(rootDir, "generation", project.id, shot.generationTaskId);
   return {
     taskId: shot.generationTaskId,
     projectId: project.id,
@@ -235,6 +246,9 @@ function generationTask(project, shot) {
     aspectRatio: project.aspectRatio,
     width: dimensions.width,
     height: dimensions.height,
+    hasDesign: project.hasDesign,
+    designPath: project.hasDesign ? resolve(projectDesignFile(project.id)) : null,
+    outputDir: taskOutputDir,
     shotId: shot.id,
     shotIndex: project.shots.findIndex((item) => item.id === shot.id) + 1,
     status: shot.generationStatus,
@@ -306,6 +320,20 @@ async function saveUploadedMedia(project, shot, request) {
   shot.generationTaskId = "";
   shot.generationError = "";
   shot.generationCompletedAt = new Date().toISOString();
+}
+
+async function saveUploadedDesign(project, request) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.startsWith("multipart/form-data")) throw new Error("需要 multipart/form-data");
+  const file = parseMultipart(await readBodyBuffer(request, 2 * 1024 * 1024), contentType);
+  if (extname(file.filename).toLowerCase() !== ".md") throw new Error("仅支持 Markdown 文件");
+
+  const content = file.content.toString("utf8").replace(/^\uFEFF/, "");
+  if (!content.trim()) throw new Error("DESIGN.md 不能为空");
+  if (content.includes("\u0000")) throw new Error("DESIGN.md 必须是 UTF-8 文本");
+
+  await writeFile(projectDesignFile(project.id), content, "utf8");
+  project.hasDesign = true;
 }
 
 async function findTask(taskId) {
@@ -410,6 +438,33 @@ async function handleProjectsApi(request, response, url) {
       shots: []
     });
     return sendJson(response, 201, await saveProject(project));
+  }
+
+  const designMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/design$/);
+  if (designMatch) {
+    const projectId = decodeURIComponent(designMatch[1]);
+    const project = await readProject(projectId);
+
+    if (request.method === "GET") {
+      if (!project.hasDesign) return sendError(response, 404, "当前项目没有 DESIGN.md");
+      return sendJson(response, 200, {
+        hasDesign: true,
+        content: await readFile(projectDesignFile(projectId), "utf8")
+      });
+    }
+
+    if (request.method === "POST") {
+      await saveUploadedDesign(project, request);
+      return sendJson(response, 200, await saveProject(project));
+    }
+
+    if (request.method === "DELETE") {
+      await rm(projectDesignFile(projectId), { force: true });
+      project.hasDesign = false;
+      return sendJson(response, 200, await saveProject(project));
+    }
+
+    return false;
   }
 
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);

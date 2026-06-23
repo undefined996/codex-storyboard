@@ -12,25 +12,25 @@ Process the local storyboard queue at `http://127.0.0.1:43218`.
 1. Call `list_storyboard_generation_tasks` with status `pending`.
 2. Process tasks one at a time.
 3. Before generating, call `claim_storyboard_generation_task`.
-4. Route by `generator`:
+4. If the claimed task has `hasDesign: true`, read the complete Markdown file at the exact absolute `designPath` before generating anything. Apply it as the project-wide visual system:
+
+   - `visualPrompt` defines the concrete shot subject and requested content.
+   - `DESIGN.md` defines shared visual style, color, typography, composition, texture, and motion language.
+   - An explicit shot requirement takes precedence if it conflicts with the general visual system.
+
+5. Route by `generator`:
 
    - `image-gen`: use the built-in `imagegen` skill and built-in image generation tool. Treat `visualPrompt` as the primary prompt and honor the task's `aspectRatio`. Copy the final verified image into the active workspace before completing the task.
    - `hyperframes`: use the HyperFrames and HyperFrames CLI skills. Create a self-contained composition using the task's `width`, `height`, duration, and `visualPrompt`, then lint, inspect, render to MP4, and verify the output.
    - `remotion`: use the Remotion skill. Create or reuse a Remotion composition using the task's `width` and `height`, render an MP4 matching the task duration, and verify the output.
 
-5. Call `complete_storyboard_generation_task` with the exact absolute output path and correct media type.
-6. If generation or verification fails, call `fail_storyboard_generation_task` with the concise cause.
-7. Continue until no pending tasks remain.
+6. Call `complete_storyboard_generation_task` with the exact absolute output path and correct media type.
+7. If generation or verification fails, call `fail_storyboard_generation_task` with the concise cause.
+8. Continue until no pending tasks remain.
 
 ## Output locations
 
-Use a separate project and task folder in the active workspace:
-
-```text
-generation/<project-id>/<task-id>/
-```
-
-Keep source code for video tasks in that folder. The MCP completion tool copies the final image or video into the storyboard media directory.
+Use the exact absolute `outputDir` supplied by the task. Keep all generated source code, intermediate files, and final outputs for that task inside this directory. The MCP completion tool copies the final image or video into the storyboard media directory.
 
 ## Guardrails
 
@@ -40,3 +40,6 @@ Keep source code for video tasks in that folder. The MCP completion tool copies 
 - Do not process `manual` generator rows.
 - Preserve the requested duration for video tasks.
 - Preserve `projectId`, `aspectRatio`, `width`, and `height`; never return an asset to a different project.
+- Never guess, truncate, or partially read `DESIGN.md` when `hasDesign` is true.
+- Do not apply a DESIGN.md from the active workspace or another project; only use the task's exact `designPath`.
+- Do not write video project files outside the task's exact `outputDir`.

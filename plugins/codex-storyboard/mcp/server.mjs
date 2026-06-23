@@ -1,7 +1,7 @@
 import readline from "node:readline";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.2.0";
+const SERVER_VERSION = "0.3.0";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 
 const JsonRpcError = {
@@ -139,7 +139,7 @@ async function callTool(id, params) {
     const summary = result.tasks.length === 0
       ? "No matching storyboard generation tasks."
       : result.tasks
-          .map((task) => `${task.taskId} | ${task.projectTitle} (${task.aspectRatio}) | shot ${task.shotIndex} | ${task.generator} | ${task.mediaType} | ${task.status}\n${task.visualPrompt}`)
+          .map((task) => `${task.taskId} | ${task.projectTitle} (${task.aspectRatio}) | shot ${task.shotIndex} | ${task.generator} | ${task.mediaType} | ${task.status} | design: ${task.hasDesign ? task.designPath : "none"} | output: ${task.outputDir}\n${task.visualPrompt}`)
           .join("\n\n");
     sendResult(id, {
       content: [{ type: "text", text: summary }],

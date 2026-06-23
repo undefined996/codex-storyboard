@@ -48,6 +48,40 @@
         <button class="theme-toggle" data-theme-toggle type="button" aria-label="切换到深色主题">
           <span class="theme-icon" aria-hidden="true"></span>
         </button>
+        <div id="design-menu" class="design-menu">
+          <button
+            id="design-menu-trigger"
+            class="design-menu-trigger"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded="false"
+          >
+            <span class="design-dot" aria-hidden="true"></span>
+            <span>视觉规范</span>
+            <span class="design-chevron" aria-hidden="true"></span>
+          </button>
+          <div id="design-menu-popover" class="design-menu-popover" role="menu" hidden>
+            <div class="design-menu-heading">
+              <strong id="design-status">无视觉规范</strong>
+              <span id="design-description">生成素材时不应用统一视觉规范</span>
+            </div>
+            <button id="view-design" class="design-menu-item" type="button" role="menuitem" hidden>
+              查看 DESIGN.md
+            </button>
+            <button id="import-design" class="design-menu-item" type="button" role="menuitem">
+              导入 DESIGN.md
+            </button>
+            <button
+              id="remove-design"
+              class="design-menu-item danger"
+              type="button"
+              role="menuitem"
+              hidden
+            >
+              移除视觉规范
+            </button>
+          </div>
+        </div>
         <button id="generate-all" class="secondary">批量生成</button>
         <button id="add-shot-top" class="primary">＋ 新增镜头</button>
       </div>
@@ -166,9 +200,51 @@
       <fieldset id="ratio-options" class="ratio-options">
         <legend>画面比例</legend>
       </fieldset>
+      <section id="project-design-option" class="design-import">
+        <div>
+          <strong>视觉规范（可选）</strong>
+          <span id="project-design-file-name">未选择 DESIGN.md</span>
+        </div>
+        <button id="choose-project-design" class="secondary compact-button" type="button">
+          选择文件
+        </button>
+      </section>
       <div class="dialog-actions">
         <button class="secondary" type="button" data-close-dialog>取消</button>
         <button id="project-submit" class="primary" type="submit">创建项目</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="design-dialog" class="form-dialog design-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">项目视觉规范</p>
+          <h2>DESIGN.md</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="关闭">×</button>
+      </div>
+      <pre id="design-content" class="design-content"></pre>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-close-dialog>关闭</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="remove-design-dialog" class="form-dialog delete-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow danger-text">移除视觉规范</p>
+          <h2>移除 DESIGN.md？</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="关闭">×</button>
+      </div>
+      <p class="delete-message">后续生成任务将不再应用这份视觉规范，已有素材不会被修改。</p>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-close-dialog>取消</button>
+        <button id="confirm-remove-design" class="danger-button" type="button">确认移除</button>
       </div>
     </form>
   </dialog>
@@ -205,6 +281,8 @@
     accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
     hidden
   />
+  <input id="project-design-upload" type="file" accept=".md,text/markdown,text/plain" hidden />
+  <input id="design-upload" type="file" accept=".md,text/markdown,text/plain" hidden />
   <div id="select-portal"></div>
   <div id="toast" class="toast" hidden></div>
 

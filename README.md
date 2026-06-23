@@ -16,6 +16,8 @@
 - 单镜头生成和批量生成队列
 - Codex MCP 自动领取任务并回填素材
 - Image Generation、HyperFrames、Remotion 路由
+- 项目级 `DESIGN.md` 视觉规范，可选导入、查看、替换和移除
+- 图片和视频生成任务自动应用项目视觉规范
 - 所有项目和素材默认只保存在本机
 
 ## 快速开始
@@ -42,10 +44,11 @@ data/
   projects/
     <project-id>/
       project.json
+      DESIGN.md
       media/
 ```
 
-这些运行数据已被 `.gitignore` 忽略，不会被提交到仓库。
+`DESIGN.md` 为可选文件，没有导入视觉规范的项目不会创建它。
 
 ## 安装 Codex 插件
 
@@ -71,9 +74,10 @@ codex plugin add codex-storyboard@codex-storyboard
 插件会：
 
 1. 读取本地分镜台的待处理任务。
-2. 根据 `generator` 选择 Image Generation、HyperFrames 或 Remotion。
-3. 使用项目的画面比例和输出尺寸生成素材。
-4. 将最终图片或视频回填到正确项目和镜头。
+2. 如果项目配置了 `DESIGN.md`，完整读取并作为统一视觉风格规范。
+3. 根据 `generator` 选择 Image Generation、HyperFrames 或 Remotion。
+4. 使用项目的画面比例和输出尺寸生成素材。
+5. 将最终图片或视频回填到正确项目和镜头。
 
 > Image Generation、HyperFrames 和 Remotion 是否可用，取决于当前 Codex 环境中已启用的能力和插件。
 
@@ -106,6 +110,23 @@ plugins/codex-storyboard/
 - HyperFrames 的画布尺寸
 - Remotion 的画布尺寸
 - MCP 生成任务中的 `aspectRatio`、`width` 和 `height`
+
+## DESIGN.md 视觉规范
+
+新建项目时可以选择导入一个 Markdown 文件作为项目视觉规范，也可以进入项目后通过右上角“视觉规范”菜单导入、查看、替换或移除。
+
+导入后，文件统一保存为：
+
+```text
+data/projects/<project-id>/DESIGN.md
+```
+
+生成任务会同时携带该文件的绝对路径。插件生成图片或视频前会完整读取它：
+
+- 分镜的“画面描述 / 生成提示词”决定当前镜头的具体内容
+- `DESIGN.md` 统一约束视觉风格、色彩、构图、字体、质感和运动语言
+- 当前镜头的明确要求与通用规范冲突时，以当前镜头要求为准
+- HyperFrames 和 Remotion 的工程及中间文件保存在项目对应的 `generation/` 目录
 
 ## 本地素材
 
@@ -147,6 +168,9 @@ POST   /api/projects
 GET    /api/projects/:projectId
 PATCH  /api/projects/:projectId
 DELETE /api/projects/:projectId
+GET    /api/projects/:projectId/design
+POST   /api/projects/:projectId/design
+DELETE /api/projects/:projectId/design
 
 POST   /api/projects/:projectId/shots
 PATCH  /api/projects/:projectId/shots/:shotId

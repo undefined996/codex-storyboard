@@ -14,6 +14,14 @@ const projectNameInput = document.querySelector("#project-name-input");
 const ratioOptions = document.querySelector("#ratio-options");
 const deleteDialog = document.querySelector("#delete-dialog");
 const mediaUpload = document.querySelector("#media-upload");
+const projectDesignOption = document.querySelector("#project-design-option");
+const projectDesignUpload = document.querySelector("#project-design-upload");
+const designUpload = document.querySelector("#design-upload");
+const designDialog = document.querySelector("#design-dialog");
+const removeDesignDialog = document.querySelector("#remove-design-dialog");
+const designMenu = document.querySelector("#design-menu");
+const designMenuTrigger = document.querySelector("#design-menu-trigger");
+const designMenuPopover = document.querySelector("#design-menu-popover");
 const lightbox = document.querySelector("#lightbox");
 const lightboxStage = document.querySelector("#lightbox-stage");
 const toast = document.querySelector("#toast");
@@ -50,6 +58,9 @@ let deletingProjectId = "";
 let uploadShotId = "";
 let lightboxShotId = "";
 let toastTimer;
+let pendingProjectDesign = null;
+let designMenuPinned = false;
+let designMenuCloseTimer;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -139,7 +150,11 @@ function generationButtonLabel(shot) {
 }
 
 function isBatchGeneratable(shot) {
-  return shot.generator !== "manual" && Boolean(shot.visualPrompt.trim());
+  return (
+    shot.generator !== "manual" &&
+    Boolean(shot.visualPrompt.trim()) &&
+    shot.generationStatus !== "ready"
+  );
 }
 
 function updateBatchButton() {
@@ -170,8 +185,12 @@ function openProjectDialog(mode, target = null) {
     mode === "create" ? "创建项目" : "保存名称";
   projectNameInput.value = target?.title || "";
   ratioOptions.hidden = mode === "rename";
+  projectDesignOption.hidden = mode === "rename";
   if (mode === "create") {
     ratioOptions.querySelector('input[value="9:16"]').checked = true;
+    pendingProjectDesign = null;
+    projectDesignUpload.value = "";
+    document.querySelector("#project-design-file-name").textContent = "未选择 DESIGN.md";
   }
   projectDialog.showModal();
   requestAnimationFrame(() => projectNameInput.focus());
@@ -258,6 +277,7 @@ async function loadProject(projectId) {
 
 function showProjectsView() {
   clearInterval(pollTimer);
+  closeDesignMenu(true);
   project = null;
   projectsView.hidden = false;
   storyboardView.hidden = true;
@@ -511,6 +531,7 @@ function renderStoryboard() {
   document.title = `${project.title} · Codex 分镜台`;
   document.querySelector("#project-title").textContent = project.title;
   document.querySelector("#project-ratio").textContent = project.aspectRatio;
+  renderDesignState();
   document.documentElement.style.setProperty("--preview-ratio", project.aspectRatio.replace(":", " / "));
   body.replaceChildren();
 
@@ -579,6 +600,89 @@ function renderStoryboard() {
 
   updateSummary();
   updateBatchButton();
+}
+
+function renderDesignState() {
+  const hasDesign = Boolean(project?.hasDesign);
+  designMenu.dataset.active = String(hasDesign);
+  document.querySelector("#design-status").textContent =
+    hasDesign ? "已配置视觉规范" : "无视觉规范";
+  document.querySelector("#design-description").textContent = hasDesign
+    ? "生成素材时自动应用"
+    : "生成素材时不应用统一视觉规范";
+  document.querySelector("#view-design").hidden = !hasDesign;
+  document.querySelector("#remove-design").hidden = !hasDesign;
+  document.querySelector("#import-design").textContent = hasDesign
+    ? "替换 DESIGN.md"
+    : "导入 DESIGN.md";
+}
+
+function openDesignMenu() {
+  clearTimeout(designMenuCloseTimer);
+  designMenuPopover.hidden = false;
+  designMenuTrigger.setAttribute("aria-expanded", "true");
+}
+
+function closeDesignMenu(force = false) {
+  clearTimeout(designMenuCloseTimer);
+  if (designMenuPinned && !force) return;
+  designMenuPinned = false;
+  designMenuPopover.hidden = true;
+  designMenuTrigger.setAttribute("aria-expanded", "false");
+}
+
+function scheduleDesignMenuClose() {
+  clearTimeout(designMenuCloseTimer);
+  if (designMenuPinned) return;
+  designMenuCloseTimer = setTimeout(() => closeDesignMenu(), 100);
+}
+
+async function uploadProjectDesign(projectId, file) {
+  const form = new FormData();
+  form.append("file", file);
+  return api(`/api/projects/${encodeURIComponent(projectId)}/design`, {
+    method: "POST",
+    body: form
+  });
+}
+
+async function importCurrentDesign(file) {
+  if (!project || !file) return;
+  const replacing = project.hasDesign;
+  saveStatus.textContent = replacing ? "替换视觉规范…" : "导入视觉规范…";
+  try {
+    project = await uploadProjectDesign(project.id, file);
+    renderDesignState();
+    saveStatus.textContent = "已保存";
+    showToast(replacing ? "视觉规范已更新" : "视觉规范已导入");
+  } catch (error) {
+    saveStatus.textContent = "导入失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function viewCurrentDesign() {
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/design`);
+    document.querySelector("#design-content").textContent = result.content;
+    designDialog.showModal();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function removeCurrentDesign() {
+  try {
+    project = await api(`/api/projects/${encodeURIComponent(project.id)}/design`, {
+      method: "DELETE"
+    });
+    removeDesignDialog.close();
+    renderDesignState();
+    saveStatus.textContent = "已保存";
+    showToast("视觉规范已移除");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 }
 
 async function cancelGeneration(shot) {
@@ -673,6 +777,15 @@ projectForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ title, aspectRatio })
     });
     projectDialog.close();
+    if (pendingProjectDesign) {
+      try {
+        await uploadProjectDesign(created.id, pendingProjectDesign);
+      } catch (error) {
+        navigate(projectPath(created.id));
+        showToast(`项目已创建，但视觉规范导入失败：${error.message}`, "error");
+        return;
+      }
+    }
     navigate(projectPath(created.id));
     return;
   }
@@ -700,6 +813,37 @@ generateAllButton.addEventListener("click", async () => {
 });
 
 mediaUpload.addEventListener("change", () => uploadMedia(mediaUpload.files?.[0]));
+document.querySelector("#choose-project-design").addEventListener("click", () => {
+  projectDesignUpload.value = "";
+  projectDesignUpload.click();
+});
+projectDesignUpload.addEventListener("change", () => {
+  pendingProjectDesign = projectDesignUpload.files?.[0] || null;
+  document.querySelector("#project-design-file-name").textContent =
+    pendingProjectDesign ? "已选择 DESIGN.md" : "未选择 DESIGN.md";
+});
+document.querySelector("#import-design").addEventListener("click", () => {
+  closeDesignMenu(true);
+  designUpload.value = "";
+  designUpload.click();
+});
+designUpload.addEventListener("change", () => importCurrentDesign(designUpload.files?.[0]));
+document.querySelector("#view-design").addEventListener("click", () => {
+  closeDesignMenu(true);
+  viewCurrentDesign();
+});
+document.querySelector("#remove-design").addEventListener("click", () => {
+  closeDesignMenu(true);
+  removeDesignDialog.showModal();
+});
+document.querySelector("#confirm-remove-design").addEventListener("click", removeCurrentDesign);
+designMenu.addEventListener("mouseenter", openDesignMenu);
+designMenu.addEventListener("mouseleave", scheduleDesignMenuClose);
+designMenuTrigger.addEventListener("click", () => {
+  if (designMenuPinned) return closeDesignMenu(true);
+  designMenuPinned = true;
+  openDesignMenu();
+});
 document.querySelector("#lightbox-close").addEventListener("click", closeLightbox);
 document.querySelector("#lightbox-upload").addEventListener("click", () => {
   if (lightboxShotId) chooseUpload(lightboxShotId);
@@ -708,6 +852,10 @@ lightbox.addEventListener("click", (event) => {
   if (event.target === lightbox || event.target === lightboxStage) closeLightbox();
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !designMenuPopover.hidden) {
+    closeDesignMenu(true);
+    designMenuTrigger.focus();
+  }
   if (event.key === "Escape" && !lightbox.hidden) closeLightbox();
   if (event.key === "Tab" && !lightbox.hidden) {
     const controls = [
@@ -723,6 +871,7 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.addEventListener("click", () => button.closest("dialog").close());
 });
 document.addEventListener("pointerdown", (event) => {
+  if (!designMenuPopover.hidden && !designMenu.contains(event.target)) closeDesignMenu(true);
   if (!activeSelect) return;
   if (activeSelect.menu.contains(event.target) || activeSelect.trigger.contains(event.target)) return;
   closeSelect();
