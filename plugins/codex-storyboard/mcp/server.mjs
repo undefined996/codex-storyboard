@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.5.0";
+const SERVER_VERSION = "0.5.1";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 const ASPECT_RATIOS = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -100,18 +100,16 @@ async function ensureStoryboard(args = {}) {
     dataDir
   ], {
     cwd: join(pluginRoot, "app"),
+    detached: true,
     env: {
       ...process.env,
       CODEX_STORYBOARD_PORT: String(port),
       CODEX_STORYBOARD_DATA_DIR: dataDir,
       NODE_ENV: "production"
     },
-    stdio: ["ignore", "ignore", "pipe"]
+    stdio: "ignore"
   });
 
-  storyboardProcess.stderr?.on("data", (chunk) => {
-    process.stderr.write(chunk);
-  });
   storyboardProcess.once("exit", (code) => {
     if (code !== 0 && code !== null) {
       process.stderr.write(`[codex-storyboard] app service exited with code ${code}\n`);
@@ -121,6 +119,7 @@ async function ensureStoryboard(args = {}) {
   storyboardProcess.once("error", () => {
     storyboardProcess = undefined;
   });
+  storyboardProcess.unref();
 
   const info = await health(url, 15_000).catch((error) => {
     storyboardProcess?.kill();
