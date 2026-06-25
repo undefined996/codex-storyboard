@@ -75,28 +75,36 @@ Codex 里的视频脚本 + 分镜表 + 素材生成工作台。
 | 本地素材上传 | 手动上传图片 / 视频，支持放大预览和替换。 |
 | 项目级 DESIGN.md | 每个项目可选导入视觉规范，用于统一图片和视频素材风格。 |
 | 多画面比例 | 支持 `9:16`、`16:9`、`3:4`、`4:3`、`1:1`。 |
+| 插件自带工作台 | 安装 Codex 插件后可直接启动本地分镜台，不需要单独 clone 项目。 |
 | 本地优先 | 项目、脚本和素材默认保存在本机。 |
 
 ## 快速开始
 
-需要 Node.js 18 或更高版本。
+推荐直接安装 Codex 插件。插件自带本地工作台运行时，不需要单独启动网页项目。
 
 ```bash
-git clone https://github.com/Yuuhann1999/codex-storyboard.git
-cd codex-storyboard
-npm start
+codex plugin marketplace add Yuuhann1999/codex-storyboard
+codex plugin add codex-storyboard@codex-storyboard
 ```
 
-打开：
+安装后重启 Codex，或新开一个对话，然后输入：
+
+```text
+@codex-storyboard 打开 Codex 分镜台。
+```
+
+插件会启动本地服务并返回链接：
 
 ```text
 http://127.0.0.1:43218
 ```
 
-首次启动会自动创建本地数据目录：
+点击链接即可在 Codex 侧边栏打开。
+
+插件模式默认数据目录：
 
 ```text
-data/
+~/.codex-storyboard/
   projects.json
   projects/
     <project-id>/
@@ -108,16 +116,33 @@ data/
 
 `DESIGN.md` 是可选文件。没有导入视觉规范的项目不会创建它。
 
-## 安装 Codex 插件
+## 开发者本地运行
+
+如果你要修改工作台源码，可以 clone 仓库后直接启动根目录项目：
+
+```bash
+git clone https://github.com/Yuuhann1999/codex-storyboard.git
+cd codex-storyboard
+npm start
+```
+
+开发模式使用仓库内数据目录：
+
+```text
+data/
+```
+
+打开：
+
+```text
+http://127.0.0.1:43218
+```
+
+## Codex 插件用法
 
 仓库自带 `codex-storyboard` 插件和 Marketplace 配置。
 
-```bash
-codex plugin marketplace add Yuuhann1999/codex-storyboard
-codex plugin add codex-storyboard@codex-storyboard
-```
-
-安装后重启 Codex，或新开一个对话，然后输入：
+创建项目：
 
 ```text
 @codex-storyboard 创建一个 9:16 的“AI 工具使用技巧”短视频分镜项目，直接写入 Codex 分镜台。
@@ -178,7 +203,7 @@ flowchart LR
 导入后，文件统一保存为：
 
 ```text
-data/projects/<project-id>/DESIGN.md
+<数据目录>/projects/<project-id>/DESIGN.md
 ```
 
 生成素材时：
@@ -190,10 +215,11 @@ data/projects/<project-id>/DESIGN.md
 
 ## Codex 插件工作流
 
-插件通过 MCP 调用分镜台本地 API，不直接写 `data/`，也不使用浏览器自动化。
+插件通过 MCP 启动内置本地工作台，并调用本地 API。它不直接写项目 JSON，也不使用浏览器自动化。
 
 支持：
 
+- 启动或连接本地 Codex 分镜台，并返回可点击链接。
 - 列出项目，并按标题查找。
 - 读取单个项目和完整镜头。
 - 一次创建项目、全部镜头和可选 `DESIGN.md`。
@@ -221,6 +247,9 @@ codex plugin add codex-storyboard@codex-storyboard
 plugins/codex-storyboard/
 ├── .codex-plugin/plugin.json
 ├── .mcp.json
+├── app/
+│   ├── server.mjs
+│   └── public/
 ├── mcp/server.mjs
 ├── scripts/start-mcp.sh
 └── skills/
@@ -298,7 +327,8 @@ POST   /api/generation/tasks/:taskId/fail
 
 ## 隐私说明
 
-- 分镜项目、脚本和素材默认保存在本地 `data/`。
+- 插件模式下，分镜项目、脚本和素材默认保存在本地 `~/.codex-storyboard/`。
+- 开发模式 `npm start` 默认使用仓库内 `data/`。
 - 仓库不会自动上传项目数据。
 - 本地服务默认运行在 `127.0.0.1:43218`。
 - 使用第三方生成能力时，提示词和输入素材可能受对应服务的隐私条款约束。

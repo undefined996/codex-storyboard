@@ -1,11 +1,21 @@
+import { spawn } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import readline from "node:readline";
-import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import net from "node:net";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.4.0";
+const SERVER_VERSION = "0.5.0";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 const ASPECT_RATIOS = ["9:16", "16:9", "3:4", "4:3", "1:1"];
+const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+const bundledServer = join(pluginRoot, "app", "server.mjs");
+const defaultDataDir = process.env.CODEX_STORYBOARD_DATA_DIR ||
+  process.env.CODEX_STORYBOARD_HOME ||
+  join(homedir(), ".codex-storyboard");
+let storyboardProcess;
 
 const JsonRpcError = {
   METHOD_NOT_FOUND: -32601,
@@ -28,8 +38,102 @@ function storyboardUrl(args = {}) {
   return String(args.storyboardUrl || process.env.CODEX_STORYBOARD_URL || DEFAULT_URL).replace(/\/+$/, "");
 }
 
+async function portAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+async function findAvailablePort(startPort) {
+  for (let port = startPort; port < startPort + 50; port += 1) {
+    if (await portAvailable(port)) return port;
+  }
+  throw new Error(`No available local port near ${startPort}`);
+}
+
+async function health(url, timeoutMs = 800) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const response = await fetch(`${url}/api/health`);
+      if (response.ok) return await response.json();
+    } catch {
+      // 服务还没启动。
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Storyboard service did not become healthy: ${url}`);
+}
+
+async function ensureStoryboard(args = {}) {
+  const explicitUrl = args.storyboardUrl || process.env.CODEX_STORYBOARD_URL;
+  if (explicitUrl) {
+    const url = String(explicitUrl).replace(/\/+$/, "");
+    const info = await health(url, 1500);
+    return { url, alreadyRunning: true, dataDir: info.dataDir };
+  }
+
+  const requestedPort = Number(args.port || process.env.CODEX_STORYBOARD_PORT || 43218);
+  const expectedUrl = `http://127.0.0.1:${requestedPort}`;
+  try {
+    const info = await health(expectedUrl);
+    return { url: expectedUrl, alreadyRunning: true, dataDir: info.dataDir };
+  } catch {
+    // 端口上没有可用的 Codex Storyboard，继续启动内置服务。
+  }
+
+  await stat(bundledServer);
+  const port = await findAvailablePort(requestedPort);
+  const url = `http://127.0.0.1:${port}`;
+  const dataDir = String(args.dataDir || defaultDataDir);
+
+  storyboardProcess = spawn(process.execPath, [
+    bundledServer,
+    "--port",
+    String(port),
+    "--data-dir",
+    dataDir
+  ], {
+    cwd: join(pluginRoot, "app"),
+    env: {
+      ...process.env,
+      CODEX_STORYBOARD_PORT: String(port),
+      CODEX_STORYBOARD_DATA_DIR: dataDir,
+      NODE_ENV: "production"
+    },
+    stdio: ["ignore", "ignore", "pipe"]
+  });
+
+  storyboardProcess.stderr?.on("data", (chunk) => {
+    process.stderr.write(chunk);
+  });
+  storyboardProcess.once("exit", (code) => {
+    if (code !== 0 && code !== null) {
+      process.stderr.write(`[codex-storyboard] app service exited with code ${code}\n`);
+    }
+    storyboardProcess = undefined;
+  });
+  storyboardProcess.once("error", () => {
+    storyboardProcess = undefined;
+  });
+
+  const info = await health(url, 15_000).catch((error) => {
+    storyboardProcess?.kill();
+    throw error;
+  });
+  return { url, alreadyRunning: false, dataDir: info.dataDir };
+}
+
 async function requestJson(path, options = {}, args = {}) {
-  const response = await fetch(`${storyboardUrl(args)}${path}`, options);
+  const base = args.storyboardUrl || process.env.CODEX_STORYBOARD_URL
+    ? storyboardUrl(args)
+    : (await ensureStoryboard(args)).url;
+  const response = await fetch(`${base}${path}`, options);
   const text = await response.text();
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : {};
@@ -88,6 +192,32 @@ async function uploadDesign(projectId, designPath, args) {
 
 function tools() {
   return [
+    {
+      name: "open_storyboard",
+      title: "Open Codex Storyboard",
+      description: "Start or open the bundled local Codex Storyboard app and return its local URL.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          port: { type: "number", description: "Preferred local port. Defaults to 43218." },
+          dataDir: {
+            type: "string",
+            description: "Optional local data directory. Defaults to ~/.codex-storyboard."
+          },
+          storyboardUrl: {
+            type: "string",
+            description: "Optional existing storyboard URL to check instead of starting the bundled app."
+          }
+        },
+        additionalProperties: false
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      }
+    },
     {
       name: "list_storyboard_projects",
       title: "List Storyboard Projects",
@@ -293,6 +423,18 @@ function tools() {
 
 async function callTool(id, params) {
   const args = params?.arguments ?? {};
+
+  if (params?.name === "open_storyboard") {
+    const result = await ensureStoryboard(args);
+    sendResult(id, {
+      content: [{
+        type: "text",
+        text: `Codex Storyboard is ready: ${result.url}\nData directory: ${result.dataDir}`
+      }],
+      structuredContent: result
+    });
+    return;
+  }
 
   if (params?.name === "list_storyboard_projects") {
     const result = await requestJson("/api/projects", {}, args);

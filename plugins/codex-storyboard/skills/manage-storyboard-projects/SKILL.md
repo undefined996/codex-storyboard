@@ -5,7 +5,18 @@ description: Create, find, inspect, update, or delete Codex Storyboard projects 
 
 # Manage Storyboard Projects
 
-Use the Codex Storyboard MCP project tools. Never control the browser and never edit `data/` files directly.
+Use the Codex Storyboard MCP project tools. Never control the browser, never run `npm start` manually during normal use, and never edit data files directly.
+
+## Open the storyboard
+
+If the user asks to open, start, launch, or show Codex Storyboard:
+
+1. Call `open_storyboard`.
+2. Return the local URL as a clickable link.
+3. Tell the user to open the link in the Codex side panel.
+4. Do not launch Chrome, shell `open`, Computer Use, or Browser automation just to open the page.
+
+The plugin starts the bundled local app automatically. Project data is stored outside the plugin cache by default.
 
 ## Create a project
 

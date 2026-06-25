@@ -5,7 +5,7 @@ description: Process pending Codex Storyboard image and video generation tasks. 
 
 # Process Codex Storyboard Tasks
 
-Process the local storyboard queue at `http://127.0.0.1:43218`.
+Process the local storyboard queue. The MCP tools start the bundled local app automatically when needed and default to `http://127.0.0.1:43218`.
 
 ## Workflow
 
