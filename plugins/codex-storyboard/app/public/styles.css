@@ -212,7 +212,7 @@ button:disabled { cursor: not-allowed; }
   z-index: var(--z-dropdown);
   top: calc(100% + 7px);
   right: 0;
-  width: 220px;
+  width: 244px;
   padding: 6px;
   border: 1px solid var(--control-border);
   border-radius: 10px;
@@ -233,6 +233,18 @@ button:disabled { cursor: not-allowed; }
   font-size: 12px;
 }
 .design-menu-heading span { color: var(--muted); font-size: 10px; }
+.menu-separator {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line-soft);
+}
+.menu-section-title {
+  padding: 7px 10px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: .06em;
+}
 .design-menu-item {
   width: 100%;
   min-height: 34px;

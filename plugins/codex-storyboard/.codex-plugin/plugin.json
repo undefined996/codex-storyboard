@@ -1,6 +1,6 @@
 {
   "name": "codex-storyboard",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Start the local storyboard app, create and manage projects, process image and video generation tasks, and return assets to Codex Storyboard.",
   "author": {
     "name": "Yuuhann"

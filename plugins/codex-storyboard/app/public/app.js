@@ -163,6 +163,323 @@ function updateBatchButton() {
   generateAllButton.textContent = count > 0 ? `批量生成 ${count}` : "批量生成";
 }
 
+function safeFileName(value) {
+  return String(value || "codex-storyboard")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 80) || "codex-storyboard";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function textBlock(value, fallback = "无") {
+  return String(value || "").trim() || fallback;
+}
+
+function downloadText(fileName, content, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportMetadataLines() {
+  const duration = project.shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0);
+  return [
+    `项目：${project.title}`,
+    `画面比例：${project.aspectRatio}`,
+    `镜头数量：${project.shots.length}`,
+    `总时长：${formatDuration(duration)}`,
+    `视觉规范：${project.hasDesign ? "已配置 DESIGN.md" : "未配置"}`,
+    `导出时间：${new Date().toLocaleString("zh-CN")}`
+  ];
+}
+
+function buildMarkdownExport() {
+  const lines = [
+    `# ${project.title}`,
+    "",
+    ...exportMetadataLines().map((line) => `- ${line}`),
+    "",
+    "## 分镜脚本",
+    ""
+  ];
+
+  project.shots.forEach((shot, index) => {
+    lines.push(
+      `### ${String(index + 1).padStart(2, "0")} · ${shot.rollType || "B-ROLL"}`,
+      "",
+      `- 媒体：${selectLabel("mediaType", shot.mediaType)}`,
+      `- 时长：${Number(shot.duration || 0)} 秒`,
+      `- 生成方式：${selectLabel("generator", shot.generator)}`,
+      `- 状态：${generationLabel(shot)}`,
+      "",
+      "**台词文案**",
+      "",
+      textBlock(shot.dialogue),
+      "",
+      "**画面描述 / 生成提示词**",
+      "",
+      textBlock(shot.visualPrompt),
+      "",
+      "**备注**",
+      "",
+      textBlock(shot.notes),
+      ""
+    );
+  });
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function buildPlainExport() {
+  return buildMarkdownExport()
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*/g, "");
+}
+
+function renderExportParagraph(value) {
+  return escapeHtml(textBlock(value)).replace(/\n/g, "<br>");
+}
+
+function buildHtmlExport() {
+  const duration = project.shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0);
+  const rows = project.shots.map((shot, index) => `
+      <tr>
+        <td class="num">${index + 1}</td>
+        <td class="type">${escapeHtml(shot.rollType || "B-ROLL")}</td>
+        <td class="duration">${Number(shot.duration || 0)}s</td>
+        <td>${renderExportParagraph(shot.dialogue)}</td>
+        <td>${renderExportParagraph(shot.visualPrompt)}</td>
+        <td>${renderExportParagraph(shot.notes)}</td>
+      </tr>
+    `).join("");
+
+  const meta = [
+    `形式：${project.aspectRatio}，约 ${formatDuration(duration)}，共 ${project.shots.length} 个镜头，素材预览不在本文档展示。`,
+    `视觉规范：${project.hasDesign ? "已配置 DESIGN.md" : "未配置"}。`,
+    `导出时间：${new Date().toLocaleString("zh-CN")}。`
+  ].join(" ");
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="generator" content="Codex Storyboard · Kami">
+  <title>${escapeHtml(project.title)} · 分镜脚本</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 14mm;
+    }
+    :root {
+      --paper: #f5f4ed;
+      --ivory: #faf9f5;
+      --brand: #1B365D;
+      --ink: #141413;
+      --dark-warm: #3d3d3a;
+      --muted: #504e49;
+      --stone: #6b6a64;
+      --border: #e8e6dc;
+      --border-soft: #e5e3d8;
+      --table-head: #EEF2F7;
+      --serif: "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", "STSong", Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--serif);
+      letter-spacing: .02em;
+      line-height: 1.42;
+    }
+    .sheet {
+      width: min(1180px, calc(100vw - 28px));
+      margin: 28px auto;
+      padding: 28px 30px 34px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--ivory);
+      box-shadow: 0 14px 48px rgba(20, 20, 19, .06);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--brand);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .12em;
+    }
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 500;
+      line-height: 1.16;
+      letter-spacing: -.01em;
+    }
+    .meta-line {
+      max-width: 980px;
+      margin: 14px 0 22px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .section-title {
+      margin: 22px 0 12px;
+      color: var(--ink);
+      font-size: 21px;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      background: #fffefa;
+      border: 1px solid var(--border);
+      font-size: 15px;
+    }
+    th,
+    td {
+      border: 1px solid var(--border-soft);
+      padding: 12px 13px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--table-head);
+      color: var(--dark-warm);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    td {
+      min-height: 72px;
+      color: var(--ink);
+      word-break: break-word;
+    }
+    .num {
+      width: 52px;
+      color: var(--brand);
+      letter-spacing: 0;
+      text-align: center;
+    }
+    .type {
+      width: 88px;
+      color: var(--brand);
+    }
+    .duration {
+      width: 66px;
+      white-space: nowrap;
+    }
+    .dialogue { width: 28%; }
+    .visual { width: 30%; }
+    .notes { width: 18%; }
+    .empty {
+      margin: 18px 0 0;
+      color: var(--stone);
+      font-size: 15px;
+    }
+    .footer {
+      margin-top: 18px;
+      color: var(--stone);
+      font-size: 12px;
+      text-align: right;
+      letter-spacing: .04em;
+    }
+    tr {
+      break-inside: avoid;
+    }
+    @media print {
+      body { background: white; }
+      .sheet {
+        width: auto;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      table { font-size: 10pt; }
+      th, td { padding: 6pt 7pt; }
+    }
+    @media (max-width: 720px) {
+      .sheet { padding: 24px 18px; }
+      .table-wrap { overflow-x: auto; }
+      table { min-width: 920px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <p class="eyebrow">CODEX STORYBOARD</p>
+    <h1>${escapeHtml(project.title)}</h1>
+    <p class="meta-line">${escapeHtml(meta)}</p>
+    <h2 class="section-title">镜头脚本</h2>
+    ${rows ? `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">镜头</th>
+              <th class="type">类型</th>
+              <th class="duration">时长</th>
+              <th class="dialogue">口播/字幕</th>
+              <th class="visual">录屏/画面</th>
+              <th class="notes">备注</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    ` : "<p class=\"empty\">当前项目暂无镜头。</p>"}
+    <p class="footer">Exported from Codex Storyboard · Kami table</p>
+  </main>
+</body>
+</html>
+`;
+}
+
+async function exportProject(format) {
+  if (!project) return;
+  try {
+    await flushSave();
+    const baseName = safeFileName(`${project.title}-分镜脚本`);
+    closeDesignMenu(true);
+
+    if (format === "markdown") {
+      downloadText(`${baseName}.md`, buildMarkdownExport(), "text/markdown;charset=utf-8");
+      showToast("Markdown 已导出");
+      return;
+    }
+
+    if (format === "html") {
+      downloadText(`${baseName}.html`, buildHtmlExport(), "text/html;charset=utf-8");
+      showToast("HTML 已导出");
+      return;
+    }
+
+    if (format === "copy") {
+      await navigator.clipboard.writeText(buildPlainExport());
+      showToast("脚本文本已复制");
+    }
+  } catch (error) {
+    showToast(error.message || "导出失败", "error");
+  }
+}
+
 function projectPath(projectId) {
   return `/project/${encodeURIComponent(projectId)}`;
 }
@@ -880,6 +1197,9 @@ document.querySelector("#remove-design").addEventListener("click", () => {
   closeDesignMenu(true);
   removeDesignDialog.showModal();
 });
+document.querySelector("#export-markdown").addEventListener("click", () => exportProject("markdown"));
+document.querySelector("#export-html").addEventListener("click", () => exportProject("html"));
+document.querySelector("#copy-script").addEventListener("click", () => exportProject("copy"));
 document.querySelector("#confirm-remove-design").addEventListener("click", removeCurrentDesign);
 designMenu.addEventListener("mouseenter", openDesignMenu);
 designMenu.addEventListener("mouseleave", scheduleDesignMenuClose);

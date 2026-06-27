@@ -48,7 +48,9 @@
         <button class="theme-toggle" data-theme-toggle type="button" aria-label="切换到深色主题">
           <span class="theme-icon" aria-hidden="true"></span>
         </button>
-        <div id="design-menu" class="design-menu">
+        <button id="generate-all" class="secondary">批量生成</button>
+        <button id="add-shot-top" class="primary">＋ 新增镜头</button>
+        <div id="design-menu" class="design-menu action-menu">
           <button
             id="design-menu-trigger"
             class="design-menu-trigger"
@@ -57,11 +59,11 @@
             aria-expanded="false"
           >
             <span class="design-dot" aria-hidden="true"></span>
-            <span>视觉规范</span>
+            <span>更多</span>
             <span class="design-chevron" aria-hidden="true"></span>
           </button>
           <div id="design-menu-popover" class="design-menu-popover" role="menu" hidden>
-            <div class="design-menu-heading">
+            <div class="design-menu-heading menu-section-heading">
               <strong id="design-status">无视觉规范</strong>
               <span id="design-description">生成素材时不应用统一视觉规范</span>
             </div>
@@ -80,10 +82,19 @@
             >
               移除视觉规范
             </button>
+            <div class="menu-separator" aria-hidden="true"></div>
+            <div class="menu-section-title">导出脚本</div>
+            <button id="export-markdown" class="design-menu-item" type="button" role="menuitem">
+              导出 Markdown
+            </button>
+            <button id="export-html" class="design-menu-item" type="button" role="menuitem">
+              导出 HTML
+            </button>
+            <button id="copy-script" class="design-menu-item" type="button" role="menuitem">
+              复制纯文本
+            </button>
           </div>
         </div>
-        <button id="generate-all" class="secondary">批量生成</button>
-        <button id="add-shot-top" class="primary">＋ 新增镜头</button>
       </div>
     </div>
   </header>
