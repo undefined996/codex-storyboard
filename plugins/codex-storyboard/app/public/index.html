@@ -59,13 +59,21 @@
             aria-expanded="false"
           >
             <span class="design-dot" aria-hidden="true"></span>
-            <span>更多</span>
+            <span>项目</span>
             <span class="design-chevron" aria-hidden="true"></span>
           </button>
           <div id="design-menu-popover" class="design-menu-popover" role="menu" hidden>
-            <div class="design-menu-heading menu-section-heading">
-              <strong id="design-status">无视觉规范</strong>
-              <span id="design-description">生成素材时不应用统一视觉规范</span>
+            <div class="menu-section-title">项目操作</div>
+            <button id="open-media-folder" class="design-menu-item" type="button" role="menuitem">
+              打开素材目录
+            </button>
+            <button id="open-cover-panel" class="design-menu-item" type="button" role="menuitem">
+              封面工作台
+            </button>
+            <div class="menu-separator" aria-hidden="true"></div>
+            <div class="menu-section-title design-section-title">
+              <span>视觉规范</span>
+              <span id="design-light" class="status-light" aria-hidden="true"></span>
             </div>
             <button id="view-design" class="design-menu-item" type="button" role="menuitem" hidden>
               查看 DESIGN.md
@@ -286,12 +294,76 @@
     </div>
   </div>
 
+  <aside id="cover-panel" class="cover-panel" hidden aria-label="短视频封面工作台">
+    <div class="cover-backdrop" data-cover-close></div>
+    <section class="cover-sheet">
+      <div class="cover-heading">
+        <div>
+          <p class="eyebrow">Cover Workspace</p>
+          <h2>短视频封面</h2>
+        </div>
+        <button id="close-cover-panel" class="dialog-close" type="button" aria-label="关闭封面工作台">×</button>
+      </div>
+
+      <div class="cover-tabs" role="tablist" aria-label="封面比例">
+        <button class="cover-tab" type="button" data-cover-type="vertical">竖屏 9:16</button>
+        <button class="cover-tab" type="button" data-cover-type="horizontal">横屏 16:9</button>
+      </div>
+
+      <div class="cover-editor">
+        <div class="cover-preview-column">
+          <div id="cover-preview-frame" class="cover-preview-frame">
+            <button id="cover-preview" class="preview cover-preview" type="button">
+              <span class="empty-preview">等待封面素材</span>
+            </button>
+          </div>
+          <div class="generation-controls">
+            <span id="cover-status" class="generation-status">未生成</span>
+            <button id="upload-cover" class="generate-shot" type="button">本地上传</button>
+          </div>
+          <button id="delete-cover" class="secondary compact-button" type="button">删除封面</button>
+        </div>
+
+        <div class="cover-form">
+          <label class="form-field cover-field">
+            <span>封面模板</span>
+            <select id="cover-preset" class="cover-select"></select>
+          </label>
+          <label class="form-field cover-field">
+            <span>封面标题（可选）</span>
+            <input id="cover-title" maxlength="80" autocomplete="off" placeholder="例如：忙碌不等于产出" />
+          </label>
+
+          <section class="cover-reference">
+            <div class="cover-reference-head">
+              <span>参考图（可选）</span>
+              <button id="upload-cover-reference" class="secondary compact-button" type="button">上传参考图</button>
+            </div>
+            <div id="cover-reference-preview" class="cover-reference-preview">
+              <span>未上传参考图</span>
+            </div>
+            <button id="delete-cover-reference" class="secondary compact-button" type="button">删除参考图</button>
+          </section>
+
+          <label id="cover-prompt-field" class="form-field cover-field">
+            <span>封面提示词</span>
+            <textarea id="cover-prompt" placeholder="描述封面视觉"></textarea>
+          </label>
+          <button id="generate-cover" class="primary cover-generate" type="button">加入 Image Generation 队列</button>
+          <p id="cover-folder-hint" class="cover-hint"></p>
+        </div>
+      </div>
+    </section>
+  </aside>
+
   <input
     id="media-upload"
     type="file"
     accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime"
     hidden
   />
+  <input id="cover-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+  <input id="cover-reference-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
   <input id="project-design-upload" type="file" accept=".md,text/markdown,text/plain" hidden />
   <input id="design-upload" type="file" accept=".md,text/markdown,text/plain" hidden />
   <div id="select-portal"></div>

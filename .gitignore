@@ -1,4 +1,5 @@
 .DS_Store
+.superpowers/
 generation/
 data/projects.json
 data/projects/

@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.5.2";
+const SERVER_VERSION = "0.5.3";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 const ASPECT_RATIOS = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -592,7 +592,13 @@ async function callTool(id, params) {
     const summary = result.tasks.length === 0
       ? "No matching storyboard generation tasks."
       : result.tasks
-          .map((task) => `${task.taskId} | ${task.projectTitle} (${task.aspectRatio}) | shot ${task.shotIndex} | ${task.generator} | ${task.mediaType} | ${task.status} | design: ${task.hasDesign ? task.designPath : "none"} | output: ${task.outputDir}\n${task.visualPrompt}`)
+          .map((task) => {
+            const target = task.taskType === "cover"
+              ? `cover ${task.coverType}`
+              : `shot ${task.shotIndex}`;
+            const reference = task.referenceImagePath ? ` | reference: ${task.referenceImagePath}` : "";
+            return `${task.taskId} | ${task.projectTitle} (${task.aspectRatio}) | ${target} | ${task.generator} | ${task.mediaType} | ${task.status} | design: ${task.hasDesign ? task.designPath : "none"}${reference} | output: ${task.outputDir}\n${task.visualPrompt}`;
+          })
           .join("\n\n");
     sendResult(id, {
       content: [{ type: "text", text: summary }],
@@ -621,7 +627,12 @@ async function callTool(id, params) {
       args
     );
     sendResult(id, {
-      content: [{ type: "text", text: `Completed ${args.taskId}; asset returned to ${result.task.projectTitle}, shot ${result.task.shotIndex}.` }],
+      content: [{
+        type: "text",
+        text: `Completed ${args.taskId}; asset returned to ${result.task.projectTitle}, ${
+          result.task.taskType === "cover" ? `cover ${result.task.coverType}` : `shot ${result.task.shotIndex}`
+        }.`
+      }],
       structuredContent: result
     });
     return;

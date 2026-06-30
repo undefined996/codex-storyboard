@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import {
   copyFile,
@@ -60,6 +61,11 @@ const allowedUploads = new Map([
   ["video/webm", ".webm"],
   ["video/quicktime", ".mov"]
 ]);
+
+const coverRatios = {
+  vertical: { label: "竖屏", aspectRatio: "9:16", width: 1080, height: 1920 },
+  horizontal: { label: "横屏", aspectRatio: "16:9", width: 1920, height: 1080 }
+};
 
 function parseArgs(argv) {
   const parsed = {};
@@ -163,6 +169,38 @@ function normalizeShot(shot = {}) {
   };
 }
 
+function normalizeCover(cover = {}, type = "vertical") {
+  const generationStatus = ["idle", "pending", "processing", "ready", "failed"].includes(
+    cover.generationStatus
+  )
+    ? cover.generationStatus
+    : cover.mediaUrl
+      ? "ready"
+      : "idle";
+
+  return {
+    type,
+    preset: String(cover.preset || "custom"),
+    title: String(cover.title || ""),
+    prompt: String(cover.prompt || ""),
+    referenceUrl: String(cover.referenceUrl || ""),
+    mediaUrl: String(cover.mediaUrl || ""),
+    generationStatus,
+    generationTaskId: String(cover.generationTaskId || ""),
+    generationError: String(cover.generationError || ""),
+    generationRequestedAt: cover.generationRequestedAt || null,
+    generationStartedAt: cover.generationStartedAt || null,
+    generationCompletedAt: cover.generationCompletedAt || null
+  };
+}
+
+function normalizeCovers(covers = {}) {
+  return {
+    vertical: normalizeCover(covers.vertical, "vertical"),
+    horizontal: normalizeCover(covers.horizontal, "horizontal")
+  };
+}
+
 function normalizeProject(project = {}) {
   const now = new Date().toISOString();
   return {
@@ -170,6 +208,7 @@ function normalizeProject(project = {}) {
     title: String(project.title || "未命名项目").trim() || "未命名项目",
     aspectRatio: normalizeAspectRatio(project.aspectRatio),
     hasDesign: Boolean(project.hasDesign),
+    covers: normalizeCovers(project.covers),
     shots: Array.isArray(project.shots) ? project.shots.map(normalizeShot) : [],
     createdAt: project.createdAt || now,
     updatedAt: project.updatedAt || now
@@ -244,10 +283,51 @@ function mediaFileNameFromUrl(url) {
   return decodeURIComponent(parts.at(-1) || "");
 }
 
+function shotMediaFileName(project, shot, extension) {
+  const index = project.shots.findIndex((item) => item.id === shot.id) + 1;
+  const order = String(Math.max(index, 1)).padStart(3, "0");
+  const roll = shot.rollType === "A-ROLL" ? "A-ROLL" : "B-ROLL";
+  const mediaType = shot.mediaType === "video" ? "video" : "image";
+  return `shot-${order}-${roll}-${mediaType}${extension}`;
+}
+
+function coverMediaFileName(type, extension) {
+  return `cover-${type === "horizontal" ? "horizontal" : "vertical"}${extension}`;
+}
+
+function coverReferenceFileName(type, extension) {
+  return `cover-${type === "horizontal" ? "horizontal" : "vertical"}-reference${extension}`;
+}
+
+async function removeCurrentMedia(project, mediaUrlValue) {
+  if (!mediaUrlValue) return;
+  const fileName = basename(mediaFileNameFromUrl(mediaUrlValue));
+  if (!fileName) return;
+  await rm(join(projectMediaDir(project.id), fileName), { force: true });
+}
+
+async function openLocalFolder(folderPath) {
+  await mkdir(folderPath, { recursive: true });
+  const command = process.platform === "darwin"
+    ? "open"
+    : process.platform === "win32"
+      ? "explorer"
+      : "xdg-open";
+  const child = spawn(command, [folderPath], {
+    detached: true,
+    stdio: "ignore"
+  });
+  child.unref();
+}
+
 async function projectSummary(record) {
   const project = await readProject(record.id);
   const duration = project.shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0);
-  const cover = project.shots.find((shot) => shot.mediaUrl)?.mediaUrl || "";
+  const cover =
+    project.covers.horizontal.mediaUrl ||
+    project.covers.vertical.mediaUrl ||
+    project.shots.find((shot) => shot.mediaUrl)?.mediaUrl ||
+    "";
   return {
     ...record,
     shotCount: project.shots.length,
@@ -257,32 +337,46 @@ async function projectSummary(record) {
   };
 }
 
-function generationTask(project, shot) {
-  const dimensions = aspectRatios[project.aspectRatio];
-  const taskOutputDir = resolve(dataDir, "generation", project.id, shot.generationTaskId);
+function generationTask(project, item, type = "shot") {
+  const isCover = type === "cover";
+  const coverSpec = isCover ? coverRatios[item.type] || coverRatios.vertical : null;
+  const dimensions = isCover ? coverSpec : aspectRatios[project.aspectRatio];
+  const taskOutputDir = resolve(dataDir, "generation", project.id, item.generationTaskId);
+  const shotIndex = isCover ? 0 : project.shots.findIndex((shot) => shot.id === item.id) + 1;
+  const referenceFileName = isCover && item.referenceUrl
+    ? basename(decodeURIComponent(String(item.referenceUrl).split("/").pop() || ""))
+    : "";
   return {
-    taskId: shot.generationTaskId,
+    taskId: item.generationTaskId,
+    taskType: type,
     projectId: project.id,
     projectTitle: project.title,
-    aspectRatio: project.aspectRatio,
+    aspectRatio: isCover ? coverSpec.aspectRatio : project.aspectRatio,
     width: dimensions.width,
     height: dimensions.height,
     hasDesign: project.hasDesign,
     designPath: project.hasDesign ? resolve(projectDesignFile(project.id)) : null,
     outputDir: taskOutputDir,
-    shotId: shot.id,
-    shotIndex: project.shots.findIndex((item) => item.id === shot.id) + 1,
-    status: shot.generationStatus,
-    generator: shot.generator,
-    mediaType: shot.mediaType,
-    duration: shot.duration,
-    dialogue: shot.dialogue,
-    visualPrompt: shot.visualPrompt,
-    notes: shot.notes,
-    requestedAt: shot.generationRequestedAt,
-    startedAt: shot.generationStartedAt,
-    completedAt: shot.generationCompletedAt,
-    error: shot.generationError
+    shotId: isCover ? null : item.id,
+    shotIndex,
+    coverType: isCover ? item.type : null,
+    coverTitle: isCover ? item.title : null,
+    coverPreset: isCover ? item.preset : null,
+    referenceImageUrl: isCover ? item.referenceUrl || "" : "",
+    referenceImagePath: referenceFileName
+      ? join(projectMediaDir(project.id), referenceFileName)
+      : null,
+    status: item.generationStatus,
+    generator: isCover ? "image-gen" : item.generator,
+    mediaType: isCover ? "image" : item.mediaType,
+    duration: isCover ? 0 : item.duration,
+    dialogue: isCover ? item.title : item.dialogue,
+    visualPrompt: isCover ? item.prompt : item.visualPrompt,
+    notes: isCover ? "短视频封面" : item.notes,
+    requestedAt: item.generationRequestedAt,
+    startedAt: item.generationStartedAt,
+    completedAt: item.generationCompletedAt,
+    error: item.generationError
   };
 }
 
@@ -290,13 +384,27 @@ async function attachMedia(project, shot, sourcePath, mediaType) {
   const resolvedSource = resolve(String(sourcePath));
   await stat(resolvedSource);
   const extension = extname(resolvedSource).toLowerCase();
-  const fileName = `${shot.id}-${Date.now()}${extension}`;
+  const fileName = shotMediaFileName(project, shot, extension);
+  await removeCurrentMedia(project, shot.mediaUrl);
   await copyFile(resolvedSource, join(projectMediaDir(project.id), fileName));
   shot.mediaUrl = mediaUrl(project.id, fileName);
   if (mediaType === "image" || mediaType === "video") shot.mediaType = mediaType;
   shot.generationStatus = "ready";
   shot.generationError = "";
   shot.generationCompletedAt = new Date().toISOString();
+}
+
+async function attachCoverMedia(project, cover, sourcePath) {
+  const resolvedSource = resolve(String(sourcePath));
+  await stat(resolvedSource);
+  const extension = extname(resolvedSource).toLowerCase();
+  const fileName = coverMediaFileName(cover.type, extension);
+  await removeCurrentMedia(project, cover.mediaUrl);
+  await copyFile(resolvedSource, join(projectMediaDir(project.id), fileName));
+  cover.mediaUrl = mediaUrl(project.id, fileName);
+  cover.generationStatus = "ready";
+  cover.generationError = "";
+  cover.generationCompletedAt = new Date().toISOString();
 }
 
 function parseMultipart(buffer, contentType) {
@@ -333,14 +441,49 @@ async function saveUploadedMedia(project, shot, request) {
   if (!extension) throw new Error("仅支持 PNG、JPEG、WebP、GIF、MP4、WebM 和 MOV");
 
   const mediaType = file.mimeType.startsWith("video/") ? "video" : "image";
-  const fileName = `${shot.id}-${Date.now()}${extension}`;
+  shot.mediaType = mediaType;
+  const fileName = shotMediaFileName(project, shot, extension);
+  await removeCurrentMedia(project, shot.mediaUrl);
   await writeFile(join(projectMediaDir(project.id), fileName), file.content);
   shot.mediaUrl = mediaUrl(project.id, fileName);
-  shot.mediaType = mediaType;
   shot.generationStatus = "ready";
   shot.generationTaskId = "";
   shot.generationError = "";
   shot.generationCompletedAt = new Date().toISOString();
+}
+
+async function saveUploadedCover(project, cover, request) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.startsWith("multipart/form-data")) throw new Error("需要 multipart/form-data");
+  const file = parseMultipart(await readBodyBuffer(request), contentType);
+  const extension = allowedUploads.get(file.mimeType);
+  if (!extension || !file.mimeType.startsWith("image/")) {
+    throw new Error("封面仅支持 PNG、JPEG、WebP 和 GIF");
+  }
+
+  const fileName = coverMediaFileName(cover.type, extension);
+  await removeCurrentMedia(project, cover.mediaUrl);
+  await writeFile(join(projectMediaDir(project.id), fileName), file.content);
+  cover.mediaUrl = mediaUrl(project.id, fileName);
+  cover.generationStatus = "ready";
+  cover.generationTaskId = "";
+  cover.generationError = "";
+  cover.generationCompletedAt = new Date().toISOString();
+}
+
+async function saveUploadedCoverReference(project, cover, request) {
+  const contentType = request.headers["content-type"] || "";
+  if (!contentType.startsWith("multipart/form-data")) throw new Error("需要 multipart/form-data");
+  const file = parseMultipart(await readBodyBuffer(request), contentType);
+  const extension = allowedUploads.get(file.mimeType);
+  if (!extension || !file.mimeType.startsWith("image/")) {
+    throw new Error("参考图仅支持 PNG、JPEG、WebP 和 GIF");
+  }
+
+  const fileName = coverReferenceFileName(cover.type, extension);
+  await removeCurrentMedia(project, cover.referenceUrl);
+  await writeFile(join(projectMediaDir(project.id), fileName), file.content);
+  cover.referenceUrl = mediaUrl(project.id, fileName);
 }
 
 async function saveUploadedDesign(project, request) {
@@ -362,7 +505,10 @@ async function findTask(taskId) {
   for (const record of index.projects) {
     const project = await readProject(record.id);
     const shot = project.shots.find((item) => item.generationTaskId === taskId);
-    if (shot) return { project, shot };
+    if (shot) return { project, item: shot, taskType: "shot" };
+    for (const cover of Object.values(project.covers)) {
+      if (cover.generationTaskId === taskId) return { project, item: cover, taskType: "cover" };
+    }
   }
   return null;
 }
@@ -490,6 +636,25 @@ async function handleProjectsApi(request, response, url) {
     return false;
   }
 
+  const mediaFolderMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/media-folder$/);
+  if (mediaFolderMatch) {
+    const projectId = decodeURIComponent(mediaFolderMatch[1]);
+    const project = await readProject(projectId);
+    const folderPath = projectMediaDir(project.id);
+
+    if (request.method === "GET") {
+      await mkdir(folderPath, { recursive: true });
+      return sendJson(response, 200, { path: folderPath });
+    }
+
+    if (request.method === "POST") {
+      await openLocalFolder(folderPath);
+      return sendJson(response, 200, { path: folderPath, opened: true });
+    }
+
+    return false;
+  }
+
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (!projectMatch) return false;
   const projectId = decodeURIComponent(projectMatch[1]);
@@ -505,6 +670,7 @@ async function handleProjectsApi(request, response, url) {
       ...current,
       title: body.title,
       aspectRatio: body.aspectRatio,
+      covers: body.covers || current.covers,
       shots: body.shots
     }));
   }
@@ -597,6 +763,67 @@ async function handleShotsApi(request, response, url) {
   return false;
 }
 
+async function handleCoversApi(request, response, url) {
+  const coverMatch = url.pathname.match(
+    /^\/api\/projects\/([^/]+)\/covers\/(vertical|horizontal)(?:\/(media|reference))?$/
+  );
+  if (!coverMatch) return false;
+
+  const project = await readProject(decodeURIComponent(coverMatch[1]));
+  const cover = project.covers[coverMatch[2]];
+  if (!cover) return sendError(response, 404, "Cover not found");
+
+  if (request.method === "PATCH") {
+    const body = await readBody(request);
+    if (body.preset !== undefined) cover.preset = String(body.preset || "custom");
+    if (body.title !== undefined) cover.title = String(body.title || "");
+    if (body.prompt !== undefined) cover.prompt = String(body.prompt || "");
+    return sendJson(response, 200, await saveProject(project));
+  }
+
+  if (request.method === "POST" && coverMatch[3] === "reference") {
+    if (cover.generationStatus === "processing") {
+      return sendError(response, 409, "生成中的封面暂时无法替换参考图");
+    }
+    await saveUploadedCoverReference(project, cover, request);
+    return sendJson(response, 200, await saveProject(project));
+  }
+
+  if (request.method === "DELETE" && coverMatch[3] === "reference") {
+    if (cover.generationStatus === "processing") {
+      return sendError(response, 409, "生成中的封面暂时无法删除参考图");
+    }
+    await removeCurrentMedia(project, cover.referenceUrl);
+    cover.referenceUrl = "";
+    return sendJson(response, 200, await saveProject(project));
+  }
+
+  if (request.method === "POST" && coverMatch[3] === "media") {
+    if (cover.generationStatus === "processing") {
+      return sendError(response, 409, "生成中的封面暂时无法替换");
+    }
+    await saveUploadedCover(project, cover, request);
+    return sendJson(response, 200, await saveProject(project));
+  }
+
+  if (request.method === "DELETE" && coverMatch[3] === "media") {
+    if (cover.generationStatus === "processing") {
+      return sendError(response, 409, "生成中的封面暂时无法删除");
+    }
+    await removeCurrentMedia(project, cover.mediaUrl);
+    cover.mediaUrl = "";
+    cover.generationStatus = "idle";
+    cover.generationTaskId = "";
+    cover.generationError = "";
+    cover.generationRequestedAt = null;
+    cover.generationStartedAt = null;
+    cover.generationCompletedAt = null;
+    return sendJson(response, 200, await saveProject(project));
+  }
+
+  return false;
+}
+
 async function handleGenerationApi(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/generation/tasks") {
     const index = await readProjectsIndex();
@@ -611,6 +838,10 @@ async function handleGenerationApi(request, response, url) {
         .filter((shot) => shot.generationTaskId)
         .filter((shot) => statuses.length === 0 || statuses.includes(shot.generationStatus))
         .map((shot) => generationTask(project, shot)));
+      tasks.push(...Object.values(project.covers)
+        .filter((cover) => cover.generationTaskId)
+        .filter((cover) => statuses.length === 0 || statuses.includes(cover.generationStatus))
+        .map((cover) => generationTask(project, cover, "cover")));
     }
     return sendJson(response, 200, { tasks });
   }
@@ -620,36 +851,67 @@ async function handleGenerationApi(request, response, url) {
     if (!body.projectId) return sendError(response, 400, "projectId is required");
     const project = await readProject(String(body.projectId));
     const requestedIds = Array.isArray(body.shotIds) ? new Set(body.shotIds.map(String)) : null;
+    const requestedCoverTypes = Array.isArray(body.coverTypes)
+      ? new Set(body.coverTypes.map(String).filter((type) => coverRatios[type]))
+      : null;
     const force = body.force === true;
     const queued = [];
     const skipped = [];
 
-    for (const shot of project.shots) {
-      if (requestedIds && !requestedIds.has(shot.id)) continue;
-      if (shot.generator === "manual") {
-        skipped.push({ shotId: shot.id, reason: "manual" });
-        continue;
-      }
-      if (!shot.visualPrompt.trim()) {
-        skipped.push({ shotId: shot.id, reason: "missing-prompt" });
-        continue;
-      }
-      if (["pending", "processing"].includes(shot.generationStatus)) {
-        skipped.push({ shotId: shot.id, reason: shot.generationStatus });
-        continue;
-      }
-      if (!force && shot.generationStatus === "ready") {
-        skipped.push({ shotId: shot.id, reason: "ready" });
-        continue;
-      }
+    if (requestedIds || !requestedCoverTypes) {
+      for (const shot of project.shots) {
+        if (requestedIds && !requestedIds.has(shot.id)) continue;
+        if (shot.generator === "manual") {
+          skipped.push({ shotId: shot.id, reason: "manual" });
+          continue;
+        }
+        if (!shot.visualPrompt.trim()) {
+          skipped.push({ shotId: shot.id, reason: "missing-prompt" });
+          continue;
+        }
+        if (["pending", "processing"].includes(shot.generationStatus)) {
+          skipped.push({ shotId: shot.id, reason: shot.generationStatus });
+          continue;
+        }
+        if (!force && shot.generationStatus === "ready") {
+          skipped.push({ shotId: shot.id, reason: "ready" });
+          continue;
+        }
 
-      shot.generationTaskId = createTaskId();
-      shot.generationStatus = "pending";
-      shot.generationError = "";
-      shot.generationRequestedAt = new Date().toISOString();
-      shot.generationStartedAt = null;
-      shot.generationCompletedAt = null;
-      queued.push(generationTask(project, shot));
+        shot.generationTaskId = createTaskId();
+        shot.generationStatus = "pending";
+        shot.generationError = "";
+        shot.generationRequestedAt = new Date().toISOString();
+        shot.generationStartedAt = null;
+        shot.generationCompletedAt = null;
+        queued.push(generationTask(project, shot));
+      }
+    }
+
+    if (requestedCoverTypes) {
+      for (const coverType of requestedCoverTypes) {
+        const cover = project.covers[coverType];
+        if (!cover.prompt.trim()) {
+          skipped.push({ coverType, reason: "missing-prompt" });
+          continue;
+        }
+        if (["pending", "processing"].includes(cover.generationStatus)) {
+          skipped.push({ coverType, reason: cover.generationStatus });
+          continue;
+        }
+        if (!force && cover.generationStatus === "ready") {
+          skipped.push({ coverType, reason: "ready" });
+          continue;
+        }
+
+        cover.generationTaskId = createTaskId();
+        cover.generationStatus = "pending";
+        cover.generationError = "";
+        cover.generationRequestedAt = new Date().toISOString();
+        cover.generationStartedAt = null;
+        cover.generationCompletedAt = null;
+        queued.push(generationTask(project, cover, "cover"));
+      }
     }
 
     const saved = await saveProject(project);
@@ -664,44 +926,48 @@ async function handleGenerationApi(request, response, url) {
       const [, taskId, action] = taskMatch;
       const found = await findTask(decodeURIComponent(taskId));
       if (!found) return sendError(response, 404, "Generation task not found");
-      const { project, shot } = found;
+      const { project, item, taskType } = found;
       const body = await readBody(request);
 
       if (action === "claim") {
-        if (shot.generationStatus !== "pending") {
-          return sendError(response, 409, `Task is ${shot.generationStatus}`);
+        if (item.generationStatus !== "pending") {
+          return sendError(response, 409, `Task is ${item.generationStatus}`);
         }
-        shot.generationStatus = "processing";
-        shot.generationStartedAt = new Date().toISOString();
+        item.generationStatus = "processing";
+        item.generationStartedAt = new Date().toISOString();
       }
 
       if (action === "complete") {
         if (!body.sourcePath) return sendError(response, 400, "sourcePath is required");
-        await attachMedia(project, shot, body.sourcePath, body.mediaType);
+        if (taskType === "cover") await attachCoverMedia(project, item, body.sourcePath);
+        else await attachMedia(project, item, body.sourcePath, body.mediaType);
       }
 
       if (action === "fail") {
-        shot.generationStatus = "failed";
-        shot.generationError = String(body.error || "生成失败");
-        shot.generationCompletedAt = new Date().toISOString();
+        item.generationStatus = "failed";
+        item.generationError = String(body.error || "生成失败");
+        item.generationCompletedAt = new Date().toISOString();
       }
 
       if (action === "cancel") {
-        if (shot.generationStatus !== "pending") {
-          return sendError(response, 409, `Task is ${shot.generationStatus}`);
+        if (item.generationStatus !== "pending") {
+          return sendError(response, 409, `Task is ${item.generationStatus}`);
         }
-        shot.generationStatus = shot.mediaUrl ? "ready" : "idle";
-        shot.generationTaskId = "";
-        shot.generationError = "";
-        shot.generationRequestedAt = null;
-        shot.generationStartedAt = null;
-        shot.generationCompletedAt = shot.mediaUrl ? shot.generationCompletedAt : null;
+        item.generationStatus = item.mediaUrl ? "ready" : "idle";
+        item.generationTaskId = "";
+        item.generationError = "";
+        item.generationRequestedAt = null;
+        item.generationStartedAt = null;
+        item.generationCompletedAt = item.mediaUrl ? item.generationCompletedAt : null;
       }
 
       const saved = await saveProject(project);
+      const savedItem = taskType === "cover"
+        ? saved.covers[item.type]
+        : saved.shots.find((shot) => shot.id === item.id);
       return sendJson(response, 200, {
         project: saved,
-        task: generationTask(saved, saved.shots.find((item) => item.id === shot.id))
+        task: generationTask(saved, savedItem, taskType)
       });
     });
   }
@@ -714,7 +980,7 @@ async function handleApi(request, response, url) {
     return sendJson(response, 200, {
       ok: true,
       app: "codex-storyboard",
-      version: "0.5.2",
+      version: "0.5.3",
       dataDir,
       publicDir
     });
@@ -722,6 +988,7 @@ async function handleApi(request, response, url) {
 
   if (await handleProjectsApi(request, response, url)) return;
   if (await handleShotsApi(request, response, url)) return;
+  if (await handleCoversApi(request, response, url)) return;
   if (await handleGenerationApi(request, response, url)) return;
   return sendError(response, 404, "API not found");
 }

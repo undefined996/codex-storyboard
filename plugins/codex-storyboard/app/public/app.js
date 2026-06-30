@@ -24,6 +24,17 @@ const designMenuTrigger = document.querySelector("#design-menu-trigger");
 const designMenuPopover = document.querySelector("#design-menu-popover");
 const lightbox = document.querySelector("#lightbox");
 const lightboxStage = document.querySelector("#lightbox-stage");
+const coverPanel = document.querySelector("#cover-panel");
+const coverPreviewFrame = document.querySelector("#cover-preview-frame");
+const coverPreview = document.querySelector("#cover-preview");
+const coverStatus = document.querySelector("#cover-status");
+const coverPreset = document.querySelector("#cover-preset");
+const coverTitle = document.querySelector("#cover-title");
+const coverPromptField = document.querySelector("#cover-prompt-field");
+const coverPrompt = document.querySelector("#cover-prompt");
+const coverUpload = document.querySelector("#cover-upload");
+const coverReferenceUpload = document.querySelector("#cover-reference-upload");
+const coverReferencePreview = document.querySelector("#cover-reference-preview");
 const toast = document.querySelector("#toast");
 const themeButtons = document.querySelectorAll("[data-theme-toggle]");
 const themeStorageKey = "codex-storyboard-theme";
@@ -46,6 +57,96 @@ const selectOptions = {
   ]
 };
 
+const coverPresets = [
+  {
+    value: "clean-explainer",
+    label: "干净知识封面",
+    skill: "clean-video-cover",
+    buildPrompt: ({ topic, titleRule, ratio }) => `Use case: ads-marketing
+Asset type: clean ${ratio} Chinese short-video cover
+Source skill: clean-video-cover / video-cover-maker
+
+Primary request:
+Create a simple, clean Chinese short-video cover for this topic:
+${topic}
+
+Style formula:
+大标题关键词 + 产品 logo / 主体符号 + 一个清晰隐喻。
+只保留一个核心隐喻，不要拼贴，不要复杂 UI，不要过多图标。
+
+Visual style:
+- Background: off-white / light grey with subtle paper grain.
+- Typography: oversized ultra-bold condensed Chinese block lettering, slightly slanted or irregular, rough paper-grain texture inside letters, subtle blue offset shadow, strong dark charcoal fill.
+- Accent color: only one cyan / blue / green accent.
+- Layout: logo or subject symbol near top, big keyword in the middle, short subtitle below, one simple metaphor at bottom.
+- Keep enough negative space. Feed-size readability first.
+
+Text rules:
+- ${titleRule}
+- Chinese text must be perfectly legible and correctly spelled.
+- No extra slogans, fake logos, watermarks, UI chrome, or unrelated captions.
+- Final image aspect ratio: ${ratio}.`
+  },
+  {
+    value: "black-overlay",
+    label: "黑蒙版白字",
+    skill: "short-video-cover",
+    buildPrompt: ({ topic, titleRule, ratio }) => `Use case: short-video talking-head cover
+Asset type: ${ratio} Chinese short-video cover
+Source skill: short-video-cover / video-cover-maker
+
+Primary request:
+Create a direct口播 style cover for this topic:
+${topic}
+
+Visual style:
+- Use a photographic background or a provided reference photo if available.
+- Add a full-canvas semi-transparent black overlay around 45% opacity.
+- Add a huge white Chinese title in bold Songti / serif style, centered in the middle visual area.
+- Title should occupy roughly 45%-65% of the cover width.
+- If a face is present, do not cover the eyes.
+
+Rules:
+- ${titleRule}
+- Chinese text must be perfectly legible and correctly spelled.
+- No extra subtitles, logos, stickers, borders, UI elements, beautification, or unrelated decoration.
+- Final image aspect ratio: ${ratio}.`
+  },
+  {
+    value: "viral-head",
+    label: "真人抠头爆款",
+    skill: "viral-head-cover",
+    buildPrompt: ({ topic, titleRule, ratio }) => `Use case: viral Chinese short-video thumbnail
+Asset type: ${ratio} cover
+Source skill: viral-head-cover / video-cover-maker
+
+Primary request:
+Create a high-impact viral Chinese short-video cover for this topic:
+${topic}
+If a portrait reference is provided, cut out only the person's head and hair, preserve identity, then place the head onto a stylized thumbnail character body in a clean exaggerated scene.
+
+Scene direction:
+Use a simple metaphor scene related to the title. Keep the background clean and high contrast. Do not create a messy poster collage.
+
+Typography:
+- Big Chinese headline with yellow or white fill, black stroke, strong thumbnail readability.
+- Split into 2-4 compact lines if needed.
+- ${titleRule}
+
+Rules:
+- Preserve identity when a real portrait is provided.
+- Chinese text must be perfectly legible and correctly spelled.
+- No extra text, fake UI, stickers, watermarks, or unrelated props.
+- Final image aspect ratio: ${ratio}.`
+  },
+  {
+    value: "custom",
+    label: "自定义 / 导入",
+    skill: "custom",
+    buildPrompt: () => ""
+  }
+];
+
 let project = null;
 let projects = [];
 let saveTimer;
@@ -61,6 +162,7 @@ let toastTimer;
 let pendingProjectDesign = null;
 let designMenuPinned = false;
 let designMenuCloseTimer;
+let activeCoverType = "vertical";
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -122,6 +224,73 @@ function emptyShot() {
   };
 }
 
+function emptyCover(type) {
+  return {
+    type,
+    preset: "custom",
+    title: "",
+    prompt: "",
+    referenceUrl: "",
+    mediaUrl: "",
+    generationStatus: "idle",
+    generationTaskId: "",
+    generationError: ""
+  };
+}
+
+function coverRatioLabel() {
+  return activeCoverType === "horizontal" ? "16:9 horizontal" : "9:16 vertical";
+}
+
+function coverPromptContext() {
+  const title = coverTitle.value.trim();
+  const topic = title || project?.title || "当前短视频主题";
+  return {
+    topic,
+    ratio: coverRatioLabel(),
+    titleRule: title
+      ? `Main headline exactly: ${title}`
+      : "No fixed headline is provided. Use a short readable Chinese title only if it improves the cover; do not render placeholder text."
+  };
+}
+
+function coverPresetByValue(value) {
+  return coverPresets.find((preset) => preset.value === value) || coverPresets[0];
+}
+
+function renderCoverPresetOptions() {
+  coverPreset.replaceChildren(
+    ...coverPresets.map((preset) => {
+      const option = document.createElement("option");
+      option.value = preset.value;
+      option.textContent = preset.label;
+      return option;
+    })
+  );
+}
+
+function applyCoverPreset(value) {
+  if (!project) return;
+  ensureCovers();
+  const cover = project.covers[activeCoverType];
+  const preset = coverPresetByValue(value);
+  cover.preset = preset.value;
+  if (preset.value !== "custom") {
+    cover.prompt = preset.buildPrompt({
+      ...coverPromptContext()
+    });
+  }
+  renderCoverPanel();
+  queueSave();
+}
+
+function ensureCovers() {
+  if (!project) return;
+  project.covers ||= {};
+  project.covers.vertical ||= emptyCover("vertical");
+  project.covers.horizontal ||= emptyCover("horizontal");
+}
+
 function formatDuration(seconds) {
   const total = Math.round(seconds);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
@@ -136,6 +305,33 @@ function generationLabel(shot) {
     ready: "已完成",
     failed: shot.generationError || "生成失败"
   }[shot.generationStatus] || "未生成";
+}
+
+function coverGenerationLabel(cover) {
+  return {
+    idle: cover.mediaUrl ? "已完成" : "未生成",
+    pending: "等待处理",
+    processing: "生成中",
+    ready: "已完成",
+    failed: cover.generationError || "生成失败"
+  }[cover.generationStatus] || "未生成";
+}
+
+function coverGenerateLabel(cover) {
+  if (cover.generationStatus === "pending") return "取消队列";
+  if (cover.generationStatus === "processing") return "生成中";
+  if (!canGenerateCover(cover)) return "填写封面提示词";
+  return cover.generationStatus === "ready" || cover.generationStatus === "failed"
+    ? "重新生成封面"
+    : "加入 Image Generation 队列";
+}
+
+function coverUsesCustomPrompt(cover) {
+  return (cover.preset || "custom") === "custom";
+}
+
+function canGenerateCover(cover) {
+  return !coverUsesCustomPrompt(cover) || Boolean(cover.prompt.trim());
 }
 
 function generationButtonLabel(shot) {
@@ -717,6 +913,209 @@ async function deleteMedia(shot) {
   }
 }
 
+function renderCoverPanel() {
+  if (!project) return;
+  ensureCovers();
+  const cover = project.covers[activeCoverType];
+  const isHorizontal = activeCoverType === "horizontal";
+
+  document.querySelectorAll("[data-cover-type]").forEach((button) => {
+    const selected = button.dataset.coverType === activeCoverType;
+    button.setAttribute("aria-selected", String(selected));
+  });
+  coverPreviewFrame.dataset.coverType = activeCoverType;
+  coverPreset.value = cover.preset || "custom";
+  coverTitle.value = cover.title || "";
+  coverPrompt.value = cover.prompt || "";
+  coverPromptField.hidden = !coverUsesCustomPrompt(cover);
+  coverStatus.textContent = coverGenerationLabel(cover);
+  coverStatus.dataset.status = cover.generationStatus || "idle";
+  coverStatus.title = cover.generationError || "";
+  document.querySelector("#generate-cover").textContent = coverGenerateLabel(cover);
+  document.querySelector("#generate-cover").disabled =
+    cover.generationStatus === "processing" ||
+    (cover.generationStatus !== "pending" && !canGenerateCover(cover));
+  document.querySelector("#delete-cover").disabled =
+    cover.generationStatus === "processing" || !cover.mediaUrl;
+  document.querySelector("#delete-cover-reference").disabled =
+    cover.generationStatus === "processing" || !cover.referenceUrl;
+  document.querySelector("#cover-folder-hint").textContent =
+    `生成或上传后保存为 ${isHorizontal ? "cover-horizontal.png" : "cover-vertical.png"}，可在项目素材目录直接取用。`;
+
+  coverReferencePreview.replaceChildren();
+  if (cover.referenceUrl) {
+    const image = document.createElement("img");
+    image.src = cover.referenceUrl;
+    image.alt = "封面参考图";
+    coverReferencePreview.append(image);
+  } else {
+    const empty = document.createElement("span");
+    empty.textContent = "未上传参考图";
+    coverReferencePreview.append(empty);
+  }
+
+  coverPreview.replaceChildren();
+  if (!cover.mediaUrl) {
+    const empty = document.createElement("span");
+    empty.className = "empty-preview";
+    empty.textContent = isHorizontal ? "等待横屏封面" : "等待竖屏封面";
+    coverPreview.append(empty);
+    coverPreview.disabled = true;
+    return;
+  }
+
+  const image = document.createElement("img");
+  image.src = cover.mediaUrl;
+  image.alt = cover.title || "短视频封面";
+  coverPreview.disabled = false;
+  coverPreview.append(image);
+  const label = document.createElement("span");
+  label.className = "media-kind";
+  label.textContent = "COVER";
+  coverPreview.append(label);
+}
+
+function openCoverPanel() {
+  closeDesignMenu(true);
+  ensureCovers();
+  coverPanel.hidden = false;
+  document.body.classList.add("lightbox-open");
+  renderCoverPanel();
+}
+
+function closeCoverPanel() {
+  coverPanel.hidden = true;
+  document.body.classList.remove("lightbox-open");
+}
+
+async function uploadCover(file) {
+  if (!project || !file) return;
+  const form = new FormData();
+  form.append("file", file);
+  saveStatus.textContent = "上传封面…";
+  try {
+    project = await api(
+      `/api/projects/${encodeURIComponent(project.id)}/covers/${activeCoverType}/media`,
+      { method: "POST", body: form }
+    );
+    renderCoverPanel();
+    saveStatus.textContent = "已保存";
+    showToast("封面已上传");
+  } catch (error) {
+    saveStatus.textContent = "上传失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function uploadCoverReference(file) {
+  if (!project || !file) return;
+  const form = new FormData();
+  form.append("file", file);
+  saveStatus.textContent = "上传参考图…";
+  try {
+    project = await api(
+      `/api/projects/${encodeURIComponent(project.id)}/covers/${activeCoverType}/reference`,
+      { method: "POST", body: form }
+    );
+    renderCoverPanel();
+    saveStatus.textContent = "已保存";
+    showToast("参考图已上传");
+  } catch (error) {
+    saveStatus.textContent = "上传失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function deleteCoverReference() {
+  if (!project) return;
+  saveStatus.textContent = "删除参考图…";
+  try {
+    project = await api(
+      `/api/projects/${encodeURIComponent(project.id)}/covers/${activeCoverType}/reference`,
+      { method: "DELETE" }
+    );
+    renderCoverPanel();
+    saveStatus.textContent = "已保存";
+    showToast("参考图已删除");
+  } catch (error) {
+    saveStatus.textContent = "删除失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function deleteCover() {
+  if (!project) return;
+  saveStatus.textContent = "删除封面…";
+  try {
+    project = await api(
+      `/api/projects/${encodeURIComponent(project.id)}/covers/${activeCoverType}/media`,
+      { method: "DELETE" }
+    );
+    renderCoverPanel();
+    saveStatus.textContent = "已保存";
+    showToast("封面已删除");
+  } catch (error) {
+    saveStatus.textContent = "删除失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function queueCoverGeneration(force = false) {
+  if (!project) return;
+  ensureCovers();
+  const cover = project.covers[activeCoverType];
+  if (cover.generationStatus === "pending") return cancelCoverGeneration(cover);
+  if (!coverUsesCustomPrompt(cover)) {
+    cover.prompt = coverPresetByValue(cover.preset).buildPrompt(coverPromptContext());
+  }
+  saveStatus.textContent = "提交封面生成任务…";
+  try {
+    await flushSave();
+    const result = await api("/api/generation/tasks", {
+      method: "POST",
+      body: JSON.stringify({ projectId: project.id, coverTypes: [activeCoverType], force })
+    });
+    project = result.project;
+    renderCoverPanel();
+    saveStatus.textContent = result.queued.length > 0 ? "已提交封面生成任务" : "封面任务已在队列中";
+  } catch (error) {
+    saveStatus.textContent = "提交失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function cancelCoverGeneration(cover) {
+  saveStatus.textContent = "取消封面生成任务…";
+  try {
+    const result = await api(
+      `/api/generation/tasks/${encodeURIComponent(cover.generationTaskId)}/cancel`,
+      { method: "POST", body: JSON.stringify({}) }
+    );
+    project = result.project;
+    renderCoverPanel();
+    saveStatus.textContent = "已取消封面生成任务";
+  } catch (error) {
+    project = await api(`/api/projects/${encodeURIComponent(project.id)}`);
+    renderCoverPanel();
+    saveStatus.textContent = "取消失败";
+    showToast(error.message, "error");
+  }
+}
+
+async function openMediaFolder() {
+  if (!project) return;
+  closeDesignMenu(true);
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/media-folder`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    showToast(`已打开素材目录：${result.path}`);
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
 function openLightbox(shot, index) {
   lightboxShotId = shot.id;
   lightboxStage.replaceChildren();
@@ -889,6 +1288,7 @@ async function saveProject() {
 
 function renderStoryboard() {
   closeSelect();
+  ensureCovers();
   document.title = `${project.title} · Codex 分镜台`;
   document.querySelector("#project-title").textContent = project.title;
   document.querySelector("#project-ratio").textContent = project.aspectRatio;
@@ -961,16 +1361,15 @@ function renderStoryboard() {
 
   updateSummary();
   updateBatchButton();
+  if (!coverPanel.hidden) renderCoverPanel();
 }
 
 function renderDesignState() {
   const hasDesign = Boolean(project?.hasDesign);
   designMenu.dataset.active = String(hasDesign);
-  document.querySelector("#design-status").textContent =
-    hasDesign ? "已配置视觉规范" : "无视觉规范";
-  document.querySelector("#design-description").textContent = hasDesign
-    ? "生成素材时自动应用"
-    : "生成素材时不应用统一视觉规范";
+  const designLight = document.querySelector("#design-light");
+  designLight.dataset.active = String(hasDesign);
+  designLight.title = hasDesign ? "已配置视觉规范" : "未配置视觉规范";
   document.querySelector("#view-design").hidden = !hasDesign;
   document.querySelector("#remove-design").hidden = !hasDesign;
   document.querySelector("#import-design").textContent = hasDesign
@@ -1117,6 +1516,7 @@ function startPolling() {
 }
 
 renderRatioOptions();
+renderCoverPresetOptions();
 updateThemeButtons();
 
 themeButtons.forEach((button) => button.addEventListener("click", toggleTheme));
@@ -1197,6 +1597,8 @@ document.querySelector("#remove-design").addEventListener("click", () => {
   closeDesignMenu(true);
   removeDesignDialog.showModal();
 });
+document.querySelector("#open-media-folder").addEventListener("click", openMediaFolder);
+document.querySelector("#open-cover-panel").addEventListener("click", openCoverPanel);
 document.querySelector("#export-markdown").addEventListener("click", () => exportProject("markdown"));
 document.querySelector("#export-html").addEventListener("click", () => exportProject("html"));
 document.querySelector("#copy-script").addEventListener("click", () => exportProject("copy"));
@@ -1212,6 +1614,58 @@ document.querySelector("#lightbox-close").addEventListener("click", closeLightbo
 document.querySelector("#lightbox-upload").addEventListener("click", () => {
   if (lightboxShotId) chooseUpload(lightboxShotId);
 });
+document.querySelector("#close-cover-panel").addEventListener("click", closeCoverPanel);
+document.querySelectorAll("[data-cover-close]").forEach((element) => {
+  element.addEventListener("click", closeCoverPanel);
+});
+document.querySelectorAll("[data-cover-type]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeCoverType = button.dataset.coverType;
+    renderCoverPanel();
+  });
+});
+coverTitle.addEventListener("input", () => {
+  ensureCovers();
+  const cover = project.covers[activeCoverType];
+  cover.title = coverTitle.value;
+  if (!coverUsesCustomPrompt(cover)) {
+    cover.prompt = coverPresetByValue(cover.preset).buildPrompt(coverPromptContext());
+    coverPrompt.value = cover.prompt;
+  }
+  queueSave();
+});
+coverPreset.addEventListener("change", () => applyCoverPreset(coverPreset.value));
+coverPrompt.addEventListener("input", () => {
+  ensureCovers();
+  const cover = project.covers[activeCoverType];
+  cover.preset = "custom";
+  cover.prompt = coverPrompt.value;
+  coverPreset.value = "custom";
+  document.querySelector("#generate-cover").textContent =
+    coverGenerateLabel(cover);
+  document.querySelector("#generate-cover").disabled =
+    cover.generationStatus === "processing" ||
+    (cover.generationStatus !== "pending" && !canGenerateCover(cover));
+  queueSave();
+});
+document.querySelector("#upload-cover").addEventListener("click", () => {
+  coverUpload.value = "";
+  coverUpload.click();
+});
+coverUpload.addEventListener("change", () => uploadCover(coverUpload.files?.[0]));
+document.querySelector("#upload-cover-reference").addEventListener("click", () => {
+  coverReferenceUpload.value = "";
+  coverReferenceUpload.click();
+});
+coverReferenceUpload.addEventListener("change", () => {
+  uploadCoverReference(coverReferenceUpload.files?.[0]);
+});
+document.querySelector("#delete-cover").addEventListener("click", deleteCover);
+document.querySelector("#delete-cover-reference").addEventListener("click", deleteCoverReference);
+document.querySelector("#generate-cover").addEventListener("click", () => {
+  const cover = project?.covers?.[activeCoverType];
+  queueCoverGeneration(cover?.generationStatus === "ready" || cover?.generationStatus === "failed");
+});
 lightbox.addEventListener("click", (event) => {
   if (event.target === lightbox || event.target === lightboxStage) closeLightbox();
 });
@@ -1221,6 +1675,7 @@ document.addEventListener("keydown", (event) => {
     designMenuTrigger.focus();
   }
   if (event.key === "Escape" && !lightbox.hidden) closeLightbox();
+  if (event.key === "Escape" && !coverPanel.hidden) closeCoverPanel();
   if (event.key === "Tab" && !lightbox.hidden) {
     const controls = [
       document.querySelector("#lightbox-close"),
