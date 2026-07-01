@@ -180,6 +180,22 @@ function projectSummary(project) {
   };
 }
 
+function projectUrl(baseUrl, projectId) {
+  return `${String(baseUrl).replace(/\/+$/, "")}/project/${encodeURIComponent(projectId)}`;
+}
+
+function videoDependencyWarnings(shots = []) {
+  const generators = new Set(shots.map((shot) => shot.generator));
+  const warnings = [];
+  if (generators.has("remotion")) {
+    warnings.push("Remotion 生成需要当前 Codex 环境启用 Remotion 插件或本地渲染工具链。");
+  }
+  if (generators.has("hyperframes")) {
+    warnings.push("HyperFrames 生成需要当前 Codex 环境启用 HyperFrames 插件和 CLI。");
+  }
+  return warnings;
+}
+
 async function uploadDesign(projectId, designPath, args) {
   const content = await readFile(designPath);
   const form = new FormData();
@@ -475,38 +491,38 @@ async function callTool(id, params) {
 
   if (params?.name === "create_storyboard_project") {
     let project;
+    const serviceUrl = args.storyboardUrl || process.env.CODEX_STORYBOARD_URL
+      ? storyboardUrl(args)
+      : (await ensureStoryboard(args)).url;
+    const requestArgs = { ...args, storyboardUrl: serviceUrl };
     try {
       project = await requestJson(
         "/api/projects",
-        jsonOptions({ title: args.title, aspectRatio: args.aspectRatio }),
-        args
+        jsonOptions({ title: args.title, aspectRatio: args.aspectRatio, shots: args.shots }),
+        requestArgs
       );
-      if (args.shots.length > 0) {
-        project = await requestJson(
-          `/api/projects/${encodeURIComponent(project.id)}/shots`,
-          jsonOptions({ shots: args.shots }),
-          args
-        );
-      }
-      if (args.designPath) project = await uploadDesign(project.id, args.designPath, args);
+      if (args.designPath) project = await uploadDesign(project.id, args.designPath, requestArgs);
     } catch (error) {
       if (project?.id) {
         await requestJson(
           `/api/projects/${encodeURIComponent(project.id)}`,
           { method: "DELETE" },
-          args
+          requestArgs
         ).catch(() => {});
       }
       throw error;
     }
 
     const summary = projectSummary(project);
+    const url = projectUrl(serviceUrl, summary.id);
+    const warnings = videoDependencyWarnings(project.shots);
+    const warningText = warnings.length > 0 ? `\n\n注意：${warnings.join(" ")}` : "";
     sendResult(id, {
       content: [{
         type: "text",
-        text: `Created ${summary.title} (${summary.aspectRatio}) with ${summary.shotCount} shots. Project ID: ${summary.id}`
+        text: `Created ${summary.title} (${summary.aspectRatio}) with ${summary.shotCount} shots. Project ID: ${summary.id}\nOpen: ${url}${warningText}`
       }],
-      structuredContent: { project: summary }
+      structuredContent: { project: summary, projectUrl: url, warnings }
     });
     return;
   }

@@ -7,6 +7,8 @@ description: Create, find, inspect, update, or delete Codex Storyboard projects 
 
 Use the Codex Storyboard MCP project tools. Never control the browser, never run `npm start` manually during normal use, and never edit data files directly.
 
+If the current Codex session does not expose Storyboard MCP tools such as `create_storyboard_project`, `list_storyboard_projects`, or `open_storyboard`, tell the user to start a new Codex conversation or restart Codex so plugin tools are reloaded. Do not silently fall back to editing local data files directly.
+
 ## Open the storyboard
 
 If the user asks to open, start, launch, or show Codex Storyboard:
@@ -23,7 +25,8 @@ The plugin starts the bundled local app automatically. Project data is stored ou
 1. Turn the user's request into a complete shot list before calling the tool.
 2. Call `create_storyboard_project` once with the project title, aspect ratio, all shots, and optional absolute `designPath`.
 3. Do not create shots one at a time.
-4. Return the created project ID and tell the user to refresh or open the storyboard.
+4. Return the created project ID and the project URL from the tool result. Tell the user to open that URL or refresh the storyboard if it is already open.
+5. If any shot uses `remotion` or `hyperframes`, mention that generation requires the corresponding plugin or local toolchain before processing assets.
 
 Each shot should include:
 

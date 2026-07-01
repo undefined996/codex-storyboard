@@ -82,6 +82,8 @@ http://127.0.0.1:43218
 
 项目创建后，打开分镜台刷新即可看到完整项目和镜头表。
 
+> 如果 Codex 当前会话没有暴露 `create_storyboard_project`、`list_storyboard_projects`、`open_storyboard` 等 Storyboard MCP 工具，请新开一个 Codex 对话或重启 Codex 后再试。插件安装后，旧会话不一定会自动重新加载工具能力。
+
 ### 4. 生成素材
 
 在分镜台里点击单个镜头的“生成素材”，或点击“批量生成”。然后让 Codex 处理队列：
@@ -335,6 +337,7 @@ plugins/codex-storyboard/
 GET    /api/health
 GET    /api/projects
 POST   /api/projects
+      # 支持在创建时传入 shots，一次性创建完整项目。
 GET    /api/projects/:projectId
 PATCH  /api/projects/:projectId
 DELETE /api/projects/:projectId

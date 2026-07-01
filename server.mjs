@@ -604,7 +604,7 @@ async function handleProjectsApi(request, response, url) {
       id: createId("project"),
       title: body.title,
       aspectRatio: body.aspectRatio,
-      shots: []
+      shots: Array.isArray(body.shots) ? body.shots : []
     });
     return sendJson(response, 201, await saveProject(project));
   }
