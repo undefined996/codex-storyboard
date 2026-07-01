@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "codex_storyboard_mcp": {
-      "command": "bash",
+      "command": "node",
       "args": [
-        "./scripts/start-mcp.sh"
+        "./mcp/server.mjs"
       ],
       "cwd": "."
     }
