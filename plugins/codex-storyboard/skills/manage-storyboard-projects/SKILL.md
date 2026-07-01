@@ -7,7 +7,7 @@ description: Create, find, inspect, update, or delete Codex Storyboard projects 
 
 Use the Codex Storyboard MCP project tools. Never control the browser, never run `npm start` manually during normal use, and never edit data files directly.
 
-If the current Codex session does not expose Storyboard MCP tools such as `create_storyboard_project`, `list_storyboard_projects`, or `open_storyboard`, tell the user to start a new Codex conversation or restart Codex so plugin tools are reloaded. Do not silently fall back to editing local data files directly.
+If the current Codex session does not expose Storyboard MCP tools such as `create_storyboard_project`, `list_storyboard_projects`, or `open_storyboard`, first use `tool_search` to search for `codex storyboard` and load the deferred tools. Only if `tool_search` is unavailable or cannot find them, tell the user to start a new Codex conversation or restart Codex so plugin tools are reloaded. Do not silently fall back to editing local data files directly.
 
 ## Open the storyboard
 

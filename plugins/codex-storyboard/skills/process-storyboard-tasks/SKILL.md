@@ -7,6 +7,8 @@ description: Process pending Codex Storyboard image and video generation tasks. 
 
 Process the local storyboard queue. The MCP tools start the bundled local app automatically when needed and default to `http://127.0.0.1:43218`.
 
+If the current Codex session does not expose Storyboard MCP tools such as `list_storyboard_generation_tasks`, `claim_storyboard_generation_task`, or `complete_storyboard_generation_task`, first use `tool_search` to search for `codex storyboard` and load the deferred tools. Only if `tool_search` is unavailable or cannot find them, tell the user to start a new Codex conversation or restart Codex so plugin tools are reloaded.
+
 ## Workflow
 
 1. Call `list_storyboard_generation_tasks` with status `pending`.

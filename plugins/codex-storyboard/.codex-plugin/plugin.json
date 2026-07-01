@@ -29,10 +29,7 @@
     "defaultPrompt": [
       "Open Codex Storyboard.",
       "Create a complete storyboard project from my video idea and write it into Codex Storyboard.",
-      "Find and update my local storyboard project.",
-      "Process all pending Codex storyboard generation tasks.",
-      "Generate the pending storyboard image assets and return them to the storyboard.",
-      "Generate the pending HyperFrames or Remotion shots and return the rendered videos."
+      "Process all pending Codex storyboard generation tasks."
     ]
   },
   "mcpServers": "./.mcp.json"
