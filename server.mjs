@@ -67,6 +67,14 @@ const coverRatios = {
   horizontal: { label: "横屏", aspectRatio: "16:9", width: 1920, height: 1080 }
 };
 
+const docxImageTypes = new Map([
+  [".png", { extension: "png", contentType: "image/png" }],
+  [".jpg", { extension: "jpg", contentType: "image/jpeg" }],
+  [".jpeg", { extension: "jpg", contentType: "image/jpeg" }],
+  [".gif", { extension: "gif", contentType: "image/gif" }],
+  [".bmp", { extension: "bmp", contentType: "image/bmp" }]
+]);
+
 function parseArgs(argv) {
   const parsed = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -283,6 +291,14 @@ function mediaFileNameFromUrl(url) {
   return decodeURIComponent(parts.at(-1) || "");
 }
 
+function safeDownloadFileName(value) {
+  return String(value || "codex-storyboard")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 80) || "codex-storyboard";
+}
+
 function shotMediaFileName(project, shot, extension) {
   const index = project.shots.findIndex((item) => item.id === shot.id) + 1;
   const order = String(Math.max(index, 1)).padStart(3, "0");
@@ -335,6 +351,260 @@ async function projectSummary(record) {
     coverUrl: cover,
     hasDesign: project.hasDesign
   };
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function docxRunXml(text, options = {}) {
+  const bold = options.bold ? "<w:b/><w:bCs/>" : "";
+  return `<w:r><w:rPr><w:rFonts w:ascii="Microsoft YaHei" w:hAnsi="Microsoft YaHei" w:eastAsia="Microsoft YaHei" w:cs="Microsoft YaHei"/>${bold}<w:color w:val="${options.color || "222222"}"/><w:sz w:val="${options.size || 18}"/><w:szCs w:val="${options.size || 18}"/></w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r>`;
+}
+
+function docxParagraphXml(text, options = {}) {
+  const value = String(text || "").replace(/\s+/g, " ").trim() || options.fallback || "无";
+  const alignment = options.alignment || "left";
+  return `<w:p><w:pPr><w:spacing w:before="${options.before || 0}" w:after="${options.after || 80}"/><w:jc w:val="${alignment}"/></w:pPr>${docxRunXml(value, options)}</w:p>`;
+}
+
+function docxParagraphsXml(text, options = {}) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (lines.length ? lines : [options.fallback || "无"]).map((line) => docxParagraphXml(line, options));
+}
+
+function docxCellXml(paragraphs, width, fill = "FFFFFF") {
+  return `<w:tc><w:tcPr><w:tcW w:type="dxa" w:w="${width}"/><w:tcBorders><w:top w:val="single" w:color="D9DEE7" w:sz="1"/><w:left w:val="single" w:color="D9DEE7" w:sz="1"/><w:bottom w:val="single" w:color="D9DEE7" w:sz="1"/><w:right w:val="single" w:color="D9DEE7" w:sz="1"/></w:tcBorders><w:shd w:fill="${fill}" w:val="clear"/><w:tcMar><w:top w:type="dxa" w:w="120"/><w:left w:type="dxa" w:w="120"/><w:bottom w:type="dxa" w:w="120"/><w:right w:type="dxa" w:w="120"/></w:tcMar><w:vAlign w:val="center"/></w:tcPr>${paragraphs.join("")}</w:tc>`;
+}
+
+function docxHeaderCellXml(text, width) {
+  return docxCellXml([
+    docxParagraphXml(text, { alignment: "center", bold: true, size: 18, color: "111827" })
+  ], width, "EAF1F8");
+}
+
+function docxPreviewSize(aspectRatio) {
+  const ratio = aspectRatios[aspectRatio] || aspectRatios["16:9"];
+  const maxWidth = 250;
+  const maxHeight = 141;
+  const scale = Math.min(maxWidth / ratio.width, maxHeight / ratio.height);
+  return {
+    width: Math.max(70, Math.round(ratio.width * scale)),
+    height: Math.max(70, Math.round(ratio.height * scale))
+  };
+}
+
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xEDB88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xFFFFFFFF;
+  for (const byte of buffer) crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function createZip(files) {
+  const chunks = [];
+  const centralDirectory = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const name = Buffer.from(file.path, "utf8");
+    const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data);
+    const checksum = crc32(data);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034B50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    chunks.push(localHeader, name, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014B50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralDirectory.push(centralHeader, name);
+
+    offset += localHeader.length + name.length + data.length;
+  }
+
+  const centralDirectorySize = centralDirectory.reduce((sum, chunk) => sum + chunk.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054B50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralDirectorySize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...chunks, ...centralDirectory, end]);
+}
+
+function docxImageParagraphXml(image) {
+  const cx = image.width * 9525;
+  const cy = image.height * 9525;
+  return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent t="0" r="0" b="0" l="0"/><wp:docPr id="${image.id}" name="${xmlEscape(image.name)}" descr="${xmlEscape(image.description)}" title="${xmlEscape(image.title)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${xmlEscape(image.name)}"/><pic:cNvPicPr><a:picLocks noChangeAspect="1" noChangeArrowheads="1"/></pic:cNvPicPr></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr bwMode="auto"><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+}
+
+async function docxMediaParagraphsXml(project, shot, shotNumber, mediaFiles) {
+  if (!shot.mediaUrl) return [docxParagraphXml("未上传素材", { color: "777777" })];
+
+  const fileName = basename(mediaFileNameFromUrl(shot.mediaUrl));
+  const mediaPath = join(projectMediaDir(project.id), fileName);
+  if (!(await exists(mediaPath))) return [docxParagraphXml("素材文件未找到", { color: "B42318" })];
+
+  if (shot.mediaType === "video") {
+    return [
+      docxParagraphXml("视频素材", { alignment: "center", color: "4B5563", bold: true }),
+      docxParagraphXml(fileName, { alignment: "center", color: "4B5563", size: 16 })
+    ];
+  }
+
+  const imageType = docxImageTypes.get(extname(mediaPath).toLowerCase());
+  if (!imageType) {
+    return [
+      docxParagraphXml("图片格式暂不支持", { alignment: "center", color: "B42318" }),
+      docxParagraphXml(fileName, { alignment: "center", color: "B42318", size: 16 })
+    ];
+  }
+
+  const size = docxPreviewSize(project.aspectRatio);
+  const mediaIndex = mediaFiles.length + 1;
+  const wordFileName = `image${mediaIndex}.${imageType.extension}`;
+  const relationshipId = `rId${mediaIndex}`;
+  mediaFiles.push({
+    path: `word/media/${wordFileName}`,
+    data: await readFile(mediaPath),
+    relationshipId,
+    contentType: imageType.contentType
+  });
+  return [
+    docxImageParagraphXml({
+      id: mediaIndex,
+      relationshipId,
+      name: wordFileName,
+      title: `镜头 ${shotNumber} 素材预览`,
+      description: shot.visualPrompt || "",
+      width: size.width,
+      height: size.height
+    })
+  ];
+}
+
+async function buildProjectDocx(project) {
+  const tableWidth = 15398;
+  const columnWidths = [1200, 3900, 3600, 4100, 2598];
+  const duration = project.shots.reduce((sum, shot) => sum + Number(shot.duration || 0), 0);
+  const mediaFiles = [];
+  const rows = [
+    `<w:tr><w:trPr><w:tblHeader/></w:trPr>${[
+      docxHeaderCellXml("镜头", columnWidths[0]),
+      docxHeaderCellXml("素材预览", columnWidths[1]),
+      docxHeaderCellXml("口播文案", columnWidths[2]),
+      docxHeaderCellXml("画面说明", columnWidths[3]),
+      docxHeaderCellXml("备注", columnWidths[4])
+    ].join("")}</w:tr>`
+  ];
+
+  for (const [index, shot] of project.shots.entries()) {
+    const shotNumber = index + 1;
+    rows.push(`<w:tr><w:trPr><w:cantSplit/></w:trPr>${[
+      docxCellXml([
+        docxParagraphXml(String(shotNumber).padStart(2, "0"), { alignment: "center", bold: true }),
+        docxParagraphXml(shot.rollType || "B-ROLL", { alignment: "center", bold: true }),
+        docxParagraphXml(`${Number(shot.duration || 0)}s`, { alignment: "center", bold: true })
+      ], columnWidths[0], "F8FAFC"),
+      docxCellXml(await docxMediaParagraphsXml(project, shot, shotNumber, mediaFiles), columnWidths[1]),
+      docxCellXml(docxParagraphsXml(shot.dialogue, { size: 19 }), columnWidths[2]),
+      docxCellXml(docxParagraphsXml(shot.visualPrompt, { size: 18 }), columnWidths[3]),
+      docxCellXml(docxParagraphsXml(shot.notes, { size: 17, color: "374151" }), columnWidths[4])
+    ].join("")}</w:tr>`);
+  }
+
+  const children = [
+    `<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:spacing w:after="120"/></w:pPr>${docxRunXml(project.title, { bold: true, size: 30, color: "111827" })}</w:p>`,
+    docxParagraphXml(
+      `项目 ID：${project.id}    画幅：${project.aspectRatio}    镜头数：${project.shots.length}    总时长：${formatDuration(duration)}`,
+      { size: 18, color: "4B5563", after: 180 }
+    )
+  ];
+
+  if (project.shots.length > 0) {
+    children.push(`<w:tbl><w:tblPr><w:tblW w:type="dxa" w:w="${tableWidth}"/><w:tblBorders><w:top w:val="single" w:color="auto" w:sz="4"/><w:left w:val="single" w:color="auto" w:sz="4"/><w:bottom w:val="single" w:color="auto" w:sz="4"/><w:right w:val="single" w:color="auto" w:sz="4"/><w:insideH w:val="single" w:color="auto" w:sz="4"/><w:insideV w:val="single" w:color="auto" w:sz="4"/></w:tblBorders></w:tblPr><w:tblGrid>${columnWidths.map((width) => `<w:gridCol w:w="${width}"/>`).join("")}</w:tblGrid>${rows.join("")}</w:tbl>`);
+  } else {
+    children.push(docxParagraphXml("当前项目暂无镜头。", { color: "777777" }));
+  }
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk" xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" mc:Ignorable="w14 w15 wp14"><w:body>${children.join("")}<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="708" w:footer="708" w:gutter="0"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
+
+  const contentTypes = new Map(mediaFiles.map((file) => [file.path.split(".").pop(), file.contentType]));
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...contentTypes].map(([extension, contentType]) => `<Default Extension="${extension}" ContentType="${contentType}"/>`).join("")}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`;
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const documentRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${mediaFiles.map((file) => `<Relationship Id="${file.relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${file.path.split("/").pop()}"/>`).join("")}</Relationships>`;
+
+  return createZip([
+    { path: "[Content_Types].xml", data: Buffer.from(contentTypesXml, "utf8") },
+    { path: "_rels/.rels", data: Buffer.from(rootRelsXml, "utf8") },
+    { path: "word/document.xml", data: Buffer.from(documentXml, "utf8") },
+    { path: "word/_rels/document.xml.rels", data: Buffer.from(documentRelsXml, "utf8") },
+    ...mediaFiles
+  ]);
+}
+
+function sendDocx(response, fileName, buffer) {
+  const encodedName = encodeURIComponent(fileName);
+  response.writeHead(200, {
+    "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content-disposition": `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`,
+    "content-length": buffer.length,
+    "cache-control": "no-store"
+  });
+  response.end(buffer);
+  return true;
 }
 
 function generationTask(project, item, type = "shot") {
@@ -652,6 +922,16 @@ async function handleProjectsApi(request, response, url) {
       return sendJson(response, 200, { path: folderPath, opened: true });
     }
 
+    return false;
+  }
+
+  const exportDocxMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/export\/docx$/);
+  if (exportDocxMatch) {
+    const project = await readProject(decodeURIComponent(exportDocxMatch[1]));
+    if (request.method === "GET") {
+      const buffer = await buildProjectDocx(project);
+      return sendDocx(response, `${safeDownloadFileName(`${project.title}-分镜脚本`)}.docx`, buffer);
+    }
     return false;
   }
 
@@ -980,7 +1260,7 @@ async function handleApi(request, response, url) {
     return sendJson(response, 200, {
       ok: true,
       app: "codex-storyboard",
-      version: "0.5.3",
+      version: "0.5.4",
       dataDir,
       publicDir
     });

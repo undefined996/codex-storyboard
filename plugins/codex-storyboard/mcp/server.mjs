@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SERVER_NAME = "Codex Storyboard MCP";
-const SERVER_VERSION = "0.5.3";
+const SERVER_VERSION = "0.5.4";
 const DEFAULT_URL = "http://127.0.0.1:43218";
 const ASPECT_RATIOS = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const pluginRoot = fileURLToPath(new URL("..", import.meta.url));

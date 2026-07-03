@@ -382,12 +382,32 @@ function textBlock(value, fallback = "无") {
 
 function downloadText(fileName, content, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
+  downloadUrl(fileName, url);
+  URL.revokeObjectURL(url);
+}
+
+function downloadUrl(fileName, url) {
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
   document.body.append(link);
   link.click();
   link.remove();
+}
+
+async function downloadBlob(fileName, path) {
+  const response = await fetch(path);
+  if (!response.ok) {
+    let message = "导出失败";
+    try {
+      message = (await response.json()).error || message;
+    } catch {
+      // 非 JSON 错误响应时保留默认提示。
+    }
+    throw new Error(message);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  downloadUrl(fileName, url);
   URL.revokeObjectURL(url);
 }
 
@@ -664,6 +684,15 @@ async function exportProject(format) {
     if (format === "html") {
       downloadText(`${baseName}.html`, buildHtmlExport(), "text/html;charset=utf-8");
       showToast("HTML 已导出");
+      return;
+    }
+
+    if (format === "word") {
+      await downloadBlob(
+        `${baseName}.docx`,
+        `/api/projects/${encodeURIComponent(project.id)}/export/docx`
+      );
+      showToast("Word 已导出");
       return;
     }
 
@@ -1601,6 +1630,7 @@ document.querySelector("#open-media-folder").addEventListener("click", openMedia
 document.querySelector("#open-cover-panel").addEventListener("click", openCoverPanel);
 document.querySelector("#export-markdown").addEventListener("click", () => exportProject("markdown"));
 document.querySelector("#export-html").addEventListener("click", () => exportProject("html"));
+document.querySelector("#export-word").addEventListener("click", () => exportProject("word"));
 document.querySelector("#copy-script").addEventListener("click", () => exportProject("copy"));
 document.querySelector("#confirm-remove-design").addEventListener("click", removeCurrentDesign);
 designMenu.addEventListener("mouseenter", openDesignMenu);

@@ -1,6 +1,6 @@
 {
   "name": "codex-storyboard",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Start the local storyboard app, create and manage projects, process image and video generation tasks, and return assets to Codex Storyboard.",
   "author": {
     "name": "Yuuhann"
@@ -21,6 +21,7 @@
       "Multi-project asset routing",
       "Project aspect-ratio support",
       "Project DESIGN.md visual guidance",
+      "Word script export",
       "Image generation routing",
       "HyperFrames video routing",
       "Remotion video routing",
