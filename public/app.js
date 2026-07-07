@@ -48,6 +48,11 @@ const presenter = document.querySelector("#presenter");
 const presenterStage = document.querySelector("#presenter-stage");
 const presenterStrip = document.querySelector("#presenter-strip");
 const arollPlaceholderUrl = "/assets/aroll-placeholder.png";
+const stylesView = document.querySelector("#styles-view");
+const stylesGrid = document.querySelector("#styles-grid");
+const stylesFilters = document.querySelector("#styles-filters");
+const styleDetailDialog = document.querySelector("#style-detail-dialog");
+const styleApplyDialog = document.querySelector("#style-apply-dialog");
 
 const ratios = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const selectOptions = {
@@ -177,6 +182,11 @@ let activeProjectTab = "storyboard";
 let activeAssetFilter = "all";
 let presenterItems = [];
 let presenterIndex = 0;
+let activeHomeTab = "projects";
+let activeStyleFilter = "all";
+let styleData = [];
+let pendingStyleId = "";
+let targetProjectId = "";
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -837,20 +847,33 @@ function showProjectsView() {
   closePresenter();
   closeLightbox();
   project = null;
-  projectsView.hidden = false;
-  storyboardView.hidden = true;
-  document.querySelector("#home-actions").hidden = false;
-  document.querySelector("#storyboard-actions").hidden = true;
-  document.title = "Codex 分镜台";
+  showHomeTab("projects");
   return loadProjects();
 }
 
 function showStoryboardView(projectId) {
   projectsView.hidden = true;
+  stylesView.hidden = true;
+  document.querySelector(".home-sidebar").hidden = true;
   storyboardView.hidden = false;
   document.querySelector("#home-actions").hidden = true;
   document.querySelector("#storyboard-actions").hidden = false;
   return loadProject(projectId);
+}
+
+function showHomeTab(tab) {
+  activeHomeTab = tab;
+  document.querySelectorAll("[data-home-tab]").forEach((button) => {
+    button.setAttribute("aria-current", button.dataset.homeTab === tab ? "page" : "false");
+  });
+  projectsView.hidden = tab !== "projects";
+  stylesView.hidden = tab !== "styles";
+  document.querySelector(".home-sidebar").hidden = false;
+  storyboardView.hidden = true;
+  document.querySelector("#home-actions").hidden = false;
+  document.querySelector("#storyboard-actions").hidden = true;
+  document.title = "Codex 分镜台";
+  if (tab === "styles") loadStylesView();
 }
 
 function route() {
@@ -1648,7 +1671,7 @@ function renderStoryboard() {
     row.querySelectorAll("[data-select-field]").forEach((container) => {
       const field = container.dataset.selectField;
       renderSelect(container, field, shot, (changedField) => {
-        if (changedField === "generator" || changedField === "mediaType") renderStoryboard();
+        if (changedField === "generator" || changedField === "mediaType" || changedField === "rollType") renderStoryboard();
         queueSave();
       });
     });
@@ -1770,6 +1793,153 @@ async function removeCurrentDesign() {
   } catch (error) {
     showToast(error.message, "error");
   }
+}
+
+// ── 风格库 ──
+
+async function loadStyleData() {
+  if (styleData.length) return styleData;
+  try {
+    const response = await fetch("/styles-data.json");
+    styleData = await response.json();
+  } catch {
+    styleData = [];
+  }
+  return styleData;
+}
+
+async function loadStylesView() {
+  const data = await loadStyleData();
+  if (!data.length) return;
+  renderStyleFilters(data);
+  renderStylesGrid(data);
+}
+
+function renderStyleFilters(data) {
+  const categories = [...new Set(data.map((s) => s.category))];
+  const existingButtons = stylesFilters.querySelectorAll("button[data-style-filter]");
+  existingButtons.forEach((b) => { if (b.dataset.styleFilter !== "all") b.remove(); });
+  categories.forEach((cat) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.styleFilter = cat;
+    button.textContent = cat;
+    button.addEventListener("click", () => {
+      activeStyleFilter = cat;
+      renderStyleFiltersState();
+      renderStylesGrid(data);
+    });
+    stylesFilters.append(button);
+  });
+  renderStyleFiltersState();
+}
+
+function renderStyleFiltersState() {
+  document.querySelectorAll("[data-style-filter]").forEach((button) => {
+    button.setAttribute("aria-current", button.dataset.styleFilter === activeStyleFilter ? "page" : "false");
+  });
+}
+
+function renderStylesGrid(data) {
+  const filtered = activeStyleFilter === "all"
+    ? data
+    : data.filter((s) => s.category === activeStyleFilter);
+  stylesGrid.innerHTML = "";
+  filtered.forEach((style) => {
+    const card = document.createElement("article");
+    card.className = "style-card";
+    card.innerHTML = `
+      <div class="style-card-preview" aria-hidden="true">
+        <img src="/assets/styles/${style.id}.png" alt="${style.name} 风格预览" loading="lazy" />
+      </div>
+      <div class="style-card-body">
+        <span class="style-card-category">${style.category}</span>
+        <strong class="style-card-name">${style.name}</strong>
+        <p class="style-card-desc">${style.description}</p>
+      </div>
+    `;
+    card.addEventListener("click", () => openStyleDetail(style));
+    stylesGrid.append(card);
+  });
+}
+
+function openStyleDetail(style) {
+  document.querySelector("#style-detail-category").textContent = style.category;
+  document.querySelector("#style-detail-name").textContent = style.name;
+  document.querySelector("#style-detail-desc").textContent = style.description;
+  document.querySelector("#style-detail-content").textContent = style.designContent;
+  const preview = document.querySelector("#style-detail-preview");
+  preview.innerHTML = `<img src="/assets/styles/${style.id}.png" alt="${style.name} 预览" style="width:100%;border-radius:12px;display:block;" />`;
+  pendingStyleId = style.id;
+  styleDetailDialog.showModal();
+}
+
+async function openStyleApplyDialog() {
+  targetProjectId = "";
+  document.querySelector("#style-apply-name").textContent =
+    styleData.find((s) => s.id === pendingStyleId)?.name || "";
+  document.querySelector("#style-apply-confirm").disabled = true;
+  const list = document.querySelector("#style-apply-project-list");
+  list.innerHTML = "";
+
+  let result;
+  try {
+    result = await api("/api/projects");
+  } catch (error) {
+    styleDetailDialog.close();
+    showToast("获取项目列表失败，请检查服务是否正常", "error");
+    return;
+  }
+
+  const projects = result.projects || result;
+  if (!Array.isArray(projects) || !projects.length) {
+    styleDetailDialog.close();
+    showToast("还没有项目，请先创建一个项目", "info");
+    return;
+  }
+
+  projects.forEach((p) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "style-apply-project-item";
+    item.innerHTML = `<span>${p.title}</span><span class="style-apply-project-meta">${p.aspectRatio}</span>`;
+    item.addEventListener("click", () => {
+      list.querySelectorAll(".style-apply-project-item").forEach((b) =>
+        b.removeAttribute("aria-selected"));
+      item.setAttribute("aria-selected", "true");
+      targetProjectId = p.id;
+      document.querySelector("#style-apply-confirm").disabled = false;
+    });
+    list.append(item);
+  });
+
+  styleDetailDialog.close();
+  styleApplyDialog.showModal();
+}
+
+async function applyStyleToProject() {
+  if (!targetProjectId || !pendingStyleId) return;
+  const style = styleData.find((s) => s.id === pendingStyleId);
+  if (!style) return;
+  try {
+    const blob = new Blob([style.designContent], { type: "text/markdown" });
+    const file = new File([blob], "DESIGN.md", { type: "text/markdown" });
+    await uploadProjectDesign(targetProjectId, file);
+    styleApplyDialog.close();
+    navigate(`/?project=${encodeURIComponent(targetProjectId)}`);
+  } catch (error) {
+    showToast(`应用风格失败：${error.message}`, "error");
+  }
+}
+
+async function uploadProjectDesignFromContent(projectId, content) {
+  const form = new FormData();
+  const blob = new Blob([content], { type: "text/markdown" });
+  form.append("file", blob, "DESIGN.md");
+  return api(`/api/projects/${encodeURIComponent(projectId)}/design`, {
+    method: "POST",
+    body: form
+  });
 }
 
 async function cancelGeneration(shot) {
@@ -2052,5 +2222,12 @@ document.addEventListener("pointerdown", (event) => {
 window.addEventListener("resize", () => closeSelect());
 document.querySelector(".table-shell").addEventListener("scroll", () => closeSelect(), { passive: true });
 window.addEventListener("popstate", route);
+
+// ── 风格库事件 ──
+document.querySelectorAll("[data-home-tab]").forEach((button) => {
+  button.addEventListener("click", () => showHomeTab(button.dataset.homeTab));
+});
+document.querySelector("#style-apply").addEventListener("click", openStyleApplyDialog);
+document.querySelector("#style-apply-confirm").addEventListener("click", applyStyleToProject);
 
 route();

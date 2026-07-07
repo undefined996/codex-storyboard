@@ -128,7 +128,29 @@
     </div>
   </header>
 
-  <main id="projects-view" class="projects-view">
+  <aside class="home-sidebar" aria-label="主导航">
+    <nav class="home-nav">
+      <button class="home-nav-item" data-home-tab="projects" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="3" width="8" height="8" rx="1.5"/>
+          <rect x="13" y="3" width="8" height="8" rx="1.5"/>
+          <rect x="3" y="13" width="8" height="8" rx="1.5"/>
+          <rect x="13" y="13" width="8" height="8" rx="1.5"/>
+        </svg>
+        <span>项目</span>
+      </button>
+      <button class="home-nav-item" data-home-tab="styles">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="9" cy="9" r="3"/>
+          <circle cx="17" cy="7" r="2.5"/>
+          <circle cx="12" cy="17" r="3.5"/>
+        </svg>
+        <span>风格库</span>
+      </button>
+    </nav>
+  </aside>
+
+  <main id="projects-view" class="projects-view home-content">
     <section class="projects-intro">
       <div>
         <h1>视频分镜项目</h1>
@@ -138,6 +160,61 @@
     </section>
     <section id="projects-grid" class="projects-grid"></section>
   </main>
+
+  <main id="styles-view" class="styles-view home-content" hidden>
+    <section class="styles-intro">
+      <div>
+        <h1>风格库</h1>
+        <p>为项目选择视觉风格，选中后会自动写入项目的 DESIGN.md 设计规范。</p>
+      </div>
+    </section>
+    <div id="styles-filters" class="styles-filters" role="tablist" aria-label="风格分类">
+      <button type="button" data-style-filter="all">全部</button>
+    </div>
+    <section id="styles-grid" class="styles-grid"></section>
+  </main>
+
+  <dialog id="style-detail-dialog" class="form-dialog style-detail-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow" id="style-detail-category"></p>
+          <h2 id="style-detail-name"></h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="关闭">×</button>
+      </div>
+      <div id="style-detail-preview" class="style-detail-preview">
+        <div id="style-detail-swatches" class="style-detail-swatches"></div>
+      </div>
+      <p id="style-detail-desc" class="style-detail-desc"></p>
+      <div class="style-detail-design">
+        <h3>视觉规范预览</h3>
+        <pre id="style-detail-content" class="design-content"></pre>
+      </div>
+      <div class="dialog-actions style-detail-actions">
+        <button class="secondary" type="button" data-close-dialog>关闭</button>
+        <button id="style-apply" class="primary" type="button">选择此风格并应用到项目</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="style-apply-dialog" class="form-dialog style-apply-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">应用风格</p>
+          <h2>选择目标项目</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="关闭">×</button>
+      </div>
+      <p class="style-apply-hint">将风格 <strong id="style-apply-name"></strong> 的视觉规范写入哪个项目？</p>
+      <div id="style-apply-project-list" class="style-apply-project-list"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-close-dialog>取消</button>
+        <button id="style-apply-confirm" class="primary" type="button" disabled>确认应用</button>
+      </div>
+    </form>
+  </dialog>
 
   <main id="storyboard-view" class="storyboard-view" hidden>
     <section id="script-panel" class="project-panel script-panel" hidden>
