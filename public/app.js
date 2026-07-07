@@ -1,5 +1,8 @@
 const projectsView = document.querySelector("#projects-view");
 const storyboardView = document.querySelector("#storyboard-view");
+const scriptPanel = document.querySelector("#script-panel");
+const storyboardPanel = document.querySelector("#storyboard-panel");
+const assetsPanel = document.querySelector("#assets-panel");
 const projectsGrid = document.querySelector("#projects-grid");
 const projectCardTemplate = document.querySelector("#project-card-template");
 const body = document.querySelector("#shots-body");
@@ -38,6 +41,13 @@ const coverReferencePreview = document.querySelector("#cover-reference-preview")
 const toast = document.querySelector("#toast");
 const themeButtons = document.querySelectorAll("[data-theme-toggle]");
 const themeStorageKey = "codex-storyboard-theme";
+const scriptDraft = document.querySelector("#script-draft");
+const scriptCount = document.querySelector("#script-count");
+const assetsGrid = document.querySelector("#assets-grid");
+const presenter = document.querySelector("#presenter");
+const presenterStage = document.querySelector("#presenter-stage");
+const presenterStrip = document.querySelector("#presenter-strip");
+const arollPlaceholderUrl = "/assets/aroll-placeholder.png";
 
 const ratios = ["9:16", "16:9", "3:4", "4:3", "1:1"];
 const selectOptions = {
@@ -163,6 +173,10 @@ let pendingProjectDesign = null;
 let designMenuPinned = false;
 let designMenuCloseTimer;
 let activeCoverType = "vertical";
+let activeProjectTab = "storyboard";
+let activeAssetFilter = "all";
+let presenterItems = [];
+let presenterIndex = 0;
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -820,6 +834,8 @@ async function loadProject(projectId) {
 function showProjectsView() {
   clearInterval(pollTimer);
   closeDesignMenu(true);
+  closePresenter();
+  closeLightbox();
   project = null;
   projectsView.hidden = false;
   storyboardView.hidden = true;
@@ -842,6 +858,166 @@ function route() {
   return projectId ? showStoryboardView(projectId) : showProjectsView();
 }
 
+function renderProjectTabs() {
+  document.querySelectorAll("[data-project-tab]").forEach((button) => {
+    const selected = button.dataset.projectTab === activeProjectTab;
+    button.setAttribute("aria-current", selected ? "page" : "false");
+  });
+  scriptPanel.hidden = activeProjectTab !== "script";
+  storyboardPanel.hidden = activeProjectTab !== "storyboard";
+  assetsPanel.hidden = activeProjectTab !== "assets";
+  document.querySelector("#add-shot-top").hidden = activeProjectTab !== "storyboard";
+  generateAllButton.hidden = activeProjectTab !== "storyboard";
+}
+
+function renderScriptPanel() {
+  const value = project.scriptDraft || "";
+  if (scriptDraft.value !== value) scriptDraft.value = value;
+  scriptCount.textContent = `${value.trim().length} 字`;
+}
+
+function buildStoryboardPrompt() {
+  const draft = (project.scriptDraft || "").trim();
+  const ratio = project.aspectRatio || "16:9";
+  return [
+    `请基于下面的完整脚本，为 Codex 分镜台项目「${project.title}」生成分镜。`,
+    "",
+    "要求：",
+    `- 画面比例：${ratio}`,
+    "- 按镜头拆分，每个镜头包含 rollType、mediaType、duration、dialogue、visualPrompt、generator、notes。",
+    "- A-ROLL 用于真人口播或主讲；B-ROLL 用于画面补充、录屏、数据图、动画。",
+    "- generator 只能使用 manual、image-gen、hyperframes、remotion。",
+    "- visualPrompt 要能直接指导图片或视频素材生成。",
+    "",
+    "完整脚本：",
+    draft || "（这里还没有填写脚本草稿）"
+  ].join("\n");
+}
+
+async function copyStoryboardPrompt() {
+  if (!project) return;
+  await flushSave();
+  await navigator.clipboard.writeText(buildStoryboardPrompt());
+  showToast("生成分镜指令已复制");
+}
+
+function coverAssets() {
+  if (!project?.covers) return [];
+  return Object.values(project.covers)
+    .filter((cover) => cover.mediaUrl)
+    .map((cover) => ({
+      id: `cover-${cover.type}`,
+      title: cover.type === "horizontal" ? "横屏封面" : "竖屏封面",
+      type: "cover",
+      mediaType: "image",
+      mediaUrl: cover.mediaUrl,
+      aspectRatio: cover.type === "horizontal" ? "16 / 9" : "9 / 16",
+      description: cover.title || cover.prompt || "短视频封面"
+    }));
+}
+
+function shotAssets() {
+  return (project?.shots || []).map((shot, index) => ({
+    id: shot.id,
+    title: `镜头 ${String(index + 1).padStart(2, "0")}`,
+    type: "shot",
+    shot,
+    shotIndex: index,
+    rollType: shot.rollType,
+    mediaType: shot.mediaUrl ? shot.mediaType : "image",
+    sourceMediaType: shot.mediaType,
+    mediaUrl: shot.mediaUrl || (shot.rollType === "A-ROLL" ? arollPlaceholderUrl : ""),
+    aspectRatio: project.aspectRatio.replace(":", " / "),
+    isPlaceholder: !shot.mediaUrl,
+    description: shot.visualPrompt || shot.dialogue || shot.notes || "暂无描述"
+  }));
+}
+
+function projectAssets() {
+  return [...coverAssets(), ...shotAssets()];
+}
+
+function renderAssetsPanel() {
+  document.querySelectorAll("[data-asset-filter]").forEach((button) => {
+    const selected = button.dataset.assetFilter === activeAssetFilter;
+    button.setAttribute("aria-selected", String(selected));
+  });
+  const assets = projectAssets().filter((item) => {
+    if (activeAssetFilter === "all") return true;
+    if (activeAssetFilter === "cover") return item.type === "cover";
+    return item.type === "shot" && item.mediaType === activeAssetFilter;
+  });
+
+  assetsGrid.replaceChildren();
+  if (assets.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "assets-empty";
+    empty.textContent = "当前筛选下暂无素材。";
+    assetsGrid.append(empty);
+    return;
+  }
+
+  assets.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "asset-card";
+    if (item.isPlaceholder) card.classList.add("is-placeholder");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "asset-preview";
+    button.style.aspectRatio = item.aspectRatio;
+    if (item.mediaUrl) {
+      const media = item.mediaType === "video"
+        ? Object.assign(document.createElement("video"), { muted: true, preload: "metadata" })
+        : document.createElement("img");
+      media.src = item.mediaUrl;
+      media.alt = item.description;
+      button.append(media);
+      button.addEventListener("click", () => openAssetPreview(item));
+    } else {
+      const empty = document.createElement("span");
+      empty.className = "empty-preview";
+      empty.textContent = "等待素材";
+      button.append(empty);
+      button.disabled = true;
+    }
+    const kind = document.createElement("span");
+    kind.className = "media-kind";
+    kind.textContent = item.type === "cover"
+      ? "COVER"
+      : item.mediaType === "video" ? "VIDEO" : "IMAGE";
+    button.append(kind);
+
+    const bodyElement = document.createElement("div");
+    bodyElement.className = "asset-card-body";
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    const meta = document.createElement("span");
+    meta.textContent = item.type === "cover"
+      ? "封面素材"
+      : `${item.rollType} · ${item.isPlaceholder ? "占位" : selectLabel("mediaType", item.sourceMediaType)}`;
+    bodyElement.append(title, meta);
+    card.append(button, bodyElement);
+    assetsGrid.append(card);
+  });
+}
+
+function openAssetPreview(item) {
+  if (item.type === "shot" && !item.isPlaceholder) return openLightbox(item.shot, item.shotIndex);
+  lightboxShotId = "";
+  lightboxStage.replaceChildren();
+  const image = document.createElement("img");
+  image.src = item.mediaUrl;
+  image.alt = item.description;
+  lightboxStage.append(image);
+  document.querySelector("#lightbox-caption").textContent = item.isPlaceholder
+    ? `${item.title} · A-ROLL 占位`
+    : item.title;
+  document.querySelector("#lightbox-upload").hidden = true;
+  lightbox.hidden = false;
+  document.body.classList.add("lightbox-open");
+  document.querySelector("#lightbox-close").focus();
+}
+
 function renderPreview(shot, index) {
   const frame = document.createElement("div");
   frame.className = "preview-frame";
@@ -855,6 +1031,24 @@ function renderPreview(shot, index) {
   frame.append(preview);
 
   if (!shot.mediaUrl) {
+    if (shot.rollType === "A-ROLL") {
+      const image = document.createElement("img");
+      image.src = arollPlaceholderUrl;
+      image.alt = `镜头 ${index + 1} A-ROLL 口播占位`;
+      preview.classList.add("aroll-placeholder");
+      preview.append(image);
+      const label = document.createElement("span");
+      label.className = "media-kind";
+      label.textContent = "A-ROLL";
+      preview.append(label);
+      if (shot.generator === "manual") {
+        preview.classList.add("is-uploadable");
+        preview.addEventListener("click", () => chooseUpload(shot.id));
+      } else {
+        preview.disabled = true;
+      }
+      return frame;
+    }
     const empty = document.createElement("span");
     empty.className = "empty-preview";
     empty.textContent = shot.generator === "manual"
@@ -1148,6 +1342,7 @@ async function openMediaFolder() {
 function openLightbox(shot, index) {
   lightboxShotId = shot.id;
   lightboxStage.replaceChildren();
+  document.querySelector("#lightbox-upload").hidden = false;
   const media = shot.mediaType === "video"
     ? Object.assign(document.createElement("video"), { controls: true, autoplay: true })
     : document.createElement("img");
@@ -1167,7 +1362,105 @@ function closeLightbox() {
   lightbox.hidden = true;
   lightboxStage.replaceChildren();
   lightboxShotId = "";
+  document.querySelector("#lightbox-upload").hidden = false;
   document.body.classList.remove("lightbox-open");
+}
+
+function buildPresenterItems() {
+  return (project?.shots || []).map((shot, index) => ({
+    id: shot.id,
+    title: `第 ${index + 1} 镜`,
+    index,
+    rollType: shot.rollType,
+    mediaType: shot.mediaType,
+    mediaUrl: shot.mediaUrl || (shot.rollType === "A-ROLL" ? arollPlaceholderUrl : ""),
+    isPlaceholder: !shot.mediaUrl,
+    description: shot.visualPrompt || shot.dialogue || shot.notes || "这一镜还没有内容描述。"
+  }));
+}
+
+function renderPresenter() {
+  const item = presenterItems[presenterIndex];
+  if (!item) return closePresenter();
+  presenterStage.querySelector("video")?.pause();
+  presenterStage.replaceChildren();
+  document.querySelector("#presenter-project").textContent = project.title;
+  document.querySelector("#presenter-title").textContent = item.title;
+  document.querySelector("#presenter-kind").textContent = item.rollType;
+  document.querySelector("#presenter-counter").textContent =
+    `${presenterIndex + 1} / ${presenterItems.length}`;
+  document.querySelector("#presenter-description").textContent = item.description;
+
+  if (item.mediaUrl) {
+    const media = item.mediaType === "video" && !item.isPlaceholder
+      ? Object.assign(document.createElement("video"), { controls: true, autoplay: true })
+      : document.createElement("img");
+    media.src = item.mediaUrl;
+    media.alt = item.description;
+    presenterStage.append(media);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "presenter-empty";
+    empty.textContent = "等待素材";
+    presenterStage.append(empty);
+  }
+
+  presenterStrip.replaceChildren();
+  presenterItems.forEach((nextItem, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "presenter-thumb";
+    button.setAttribute("aria-current", String(index === presenterIndex));
+    if (nextItem.mediaUrl) {
+      const media = nextItem.mediaType === "video" && !nextItem.isPlaceholder
+        ? Object.assign(document.createElement("video"), { muted: true, preload: "metadata" })
+        : document.createElement("img");
+      media.src = nextItem.mediaUrl;
+      media.alt = nextItem.title;
+      button.append(media);
+    } else {
+      const empty = document.createElement("span");
+      empty.textContent = String(index + 1).padStart(2, "0");
+      button.append(empty);
+    }
+    const label = document.createElement("small");
+    label.textContent = `${index + 1}`;
+    button.append(label);
+    button.addEventListener("click", () => {
+      presenterIndex = index;
+      renderPresenter();
+    });
+    presenterStrip.append(button);
+  });
+}
+
+function openPresenter() {
+  if (!project) return;
+  presenterItems = buildPresenterItems();
+  if (presenterItems.length === 0) {
+    showToast("当前项目还没有镜头", "error");
+    return;
+  }
+  presenterIndex = 0;
+  presenter.hidden = false;
+  document.body.classList.add("lightbox-open");
+  renderPresenter();
+  document.querySelector("#presenter-close").focus();
+}
+
+function closePresenter() {
+  if (presenter.hidden) return;
+  presenterStage.querySelector("video")?.pause();
+  presenter.hidden = true;
+  presenterStage.replaceChildren();
+  presenterStrip.replaceChildren();
+  document.body.classList.remove("lightbox-open");
+}
+
+function movePresenter(offset) {
+  if (presenter.hidden || presenterItems.length === 0) return;
+  presenterIndex = (presenterIndex + offset + presenterItems.length) % presenterItems.length;
+  renderPresenter();
 }
 
 function selectLabel(field, value) {
@@ -1319,9 +1612,12 @@ async function saveProject() {
 function renderStoryboard() {
   closeSelect();
   ensureCovers();
+  project.scriptDraft = String(project.scriptDraft || "");
   document.title = `${project.title} · Codex 分镜台`;
   document.querySelector("#project-title").textContent = project.title;
   document.querySelector("#project-ratio").textContent = project.aspectRatio;
+  renderProjectTabs();
+  renderScriptPanel();
   renderDesignState();
   document.documentElement.style.setProperty("--preview-ratio", project.aspectRatio.replace(":", " / "));
   body.replaceChildren();
@@ -1391,6 +1687,7 @@ function renderStoryboard() {
 
   updateSummary();
   updateBatchButton();
+  renderAssetsPanel();
   if (!coverPanel.hidden) renderCoverPanel();
 }
 
@@ -1554,6 +1851,26 @@ document.querySelector("#create-project").addEventListener("click", () => openPr
 document.querySelector("#brand-home").addEventListener("click", () => navigate("/"));
 document.querySelector("#back-home").addEventListener("click", () => navigate("/"));
 document.querySelector("#add-shot-top").addEventListener("click", addShot);
+document.querySelector("#present-project").addEventListener("click", openPresenter);
+document.querySelector("#copy-storyboard-prompt").addEventListener("click", copyStoryboardPrompt);
+scriptDraft.addEventListener("input", () => {
+  if (!project) return;
+  project.scriptDraft = scriptDraft.value;
+  renderScriptPanel();
+  queueSave();
+});
+document.querySelectorAll("[data-project-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeProjectTab = button.dataset.projectTab;
+    renderStoryboard();
+  });
+});
+document.querySelectorAll("[data-asset-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeAssetFilter = button.dataset.assetFilter;
+    renderAssetsPanel();
+  });
+});
 
 projectForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1598,6 +1915,7 @@ document.querySelector("#confirm-delete").addEventListener("click", async (event
 });
 
 generateAllButton.addEventListener("click", async () => {
+  closeDesignMenu(true);
   const shotIds = project.shots.filter(isBatchGeneratable).map((shot) => shot.id);
   await queueGeneration(shotIds, true);
 });
@@ -1644,6 +1962,9 @@ document.querySelector("#lightbox-close").addEventListener("click", closeLightbo
 document.querySelector("#lightbox-upload").addEventListener("click", () => {
   if (lightboxShotId) chooseUpload(lightboxShotId);
 });
+document.querySelector("#presenter-close").addEventListener("click", closePresenter);
+document.querySelector("#presenter-prev").addEventListener("click", () => movePresenter(-1));
+document.querySelector("#presenter-next").addEventListener("click", () => movePresenter(1));
 document.querySelector("#close-cover-panel").addEventListener("click", closeCoverPanel);
 document.querySelectorAll("[data-cover-close]").forEach((element) => {
   element.addEventListener("click", closeCoverPanel);
@@ -1705,6 +2026,9 @@ document.addEventListener("keydown", (event) => {
     designMenuTrigger.focus();
   }
   if (event.key === "Escape" && !lightbox.hidden) closeLightbox();
+  if (event.key === "Escape" && !presenter.hidden) closePresenter();
+  if (event.key === "ArrowLeft" && !presenter.hidden) movePresenter(-1);
+  if (event.key === "ArrowRight" && !presenter.hidden) movePresenter(1);
   if (event.key === "Escape" && !coverPanel.hidden) closeCoverPanel();
   if (event.key === "Tab" && !lightbox.hidden) {
     const controls = [

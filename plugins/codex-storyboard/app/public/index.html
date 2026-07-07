@@ -39,11 +39,16 @@
 
     <div id="storyboard-actions" class="storyboard-header" hidden>
       <div class="project-heading">
-        <button id="back-home" class="back-button" type="button">← 项目首页</button>
+        <button id="back-home" class="back-button" type="button" aria-label="返回项目首页">←</button>
         <span class="header-divider"></span>
         <strong id="project-title"></strong>
         <span id="project-ratio" class="ratio-badge"></span>
       </div>
+      <nav class="project-tabs" aria-label="项目模块">
+        <button class="project-tab" type="button" data-project-tab="script">脚本</button>
+        <button class="project-tab" type="button" data-project-tab="storyboard">分镜</button>
+        <button class="project-tab" type="button" data-project-tab="assets">素材</button>
+      </nav>
       <div class="summary">
         <span id="save-status" aria-live="polite">已保存</span>
         <span class="summary-label">总时长</span>
@@ -51,7 +56,14 @@
         <button class="theme-toggle" data-theme-toggle type="button" aria-label="切换到深色主题">
           <span class="theme-icon" aria-hidden="true"></span>
         </button>
-        <button id="generate-all" class="secondary">批量生成</button>
+        <button id="present-project" class="present-button" type="button" aria-label="演示分镜">
+          <svg viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M3.5 3h11A1.5 1.5 0 0 1 16 4.5v7A1.5 1.5 0 0 1 14.5 13h-11A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3Z" />
+            <path d="m7.5 6 4 2-4 2Z" />
+            <path d="M7 15h4" />
+          </svg>
+          <span>演示</span>
+        </button>
         <button id="add-shot-top" class="primary">＋ 新增镜头</button>
         <div id="design-menu" class="design-menu action-menu">
           <button
@@ -72,6 +84,9 @@
             </button>
             <button id="open-cover-panel" class="design-menu-item" type="button" role="menuitem">
               封面工作台
+            </button>
+            <button id="generate-all" class="design-menu-item" type="button" role="menuitem">
+              批量生成
             </button>
             <div class="menu-separator" aria-hidden="true"></div>
             <div class="menu-section-title design-section-title">
@@ -125,7 +140,28 @@
   </main>
 
   <main id="storyboard-view" class="storyboard-view" hidden>
-    <section class="table-shell">
+    <section id="script-panel" class="project-panel script-panel" hidden>
+      <div class="script-card">
+        <div class="script-copy">
+          <p class="eyebrow">Script</p>
+          <h1>脚本草稿</h1>
+          <p>把完整口播、文章或剪辑思路放在这里。</p>
+        </div>
+        <div class="script-editor">
+          <textarea
+            id="script-draft"
+            placeholder="把完整口播、文章、访谈提纲或剪辑思路粘贴到这里。"
+          ></textarea>
+          <div class="script-actions">
+            <span id="script-count">0 字</span>
+            <button id="copy-storyboard-prompt" class="secondary" type="button">复制生成分镜指令</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="storyboard-panel" class="project-panel storyboard-panel">
+      <div class="table-shell">
       <table>
         <colgroup>
           <col class="col-index" />
@@ -155,6 +191,23 @@
         </thead>
         <tbody id="shots-body"></tbody>
       </table>
+      </div>
+    </section>
+
+    <section id="assets-panel" class="project-panel assets-panel" hidden>
+      <div class="assets-head">
+        <div>
+          <p class="eyebrow">Assets</p>
+          <h2>素材总览</h2>
+        </div>
+        <div id="assets-filters" class="assets-filters" role="tablist" aria-label="素材筛选">
+          <button type="button" data-asset-filter="all">全部</button>
+          <button type="button" data-asset-filter="image">图片</button>
+          <button type="button" data-asset-filter="video">视频</button>
+          <button type="button" data-asset-filter="cover">封面</button>
+        </div>
+      </div>
+      <div id="assets-grid" class="assets-grid"></div>
     </section>
   </main>
 
@@ -297,6 +350,28 @@
       <span id="lightbox-caption"></span>
       <button id="lightbox-upload" class="lightbox-upload" type="button">重新上传</button>
     </div>
+  </div>
+
+  <div id="presenter" class="presenter" hidden role="dialog" aria-modal="true" aria-label="分镜演示">
+    <div class="presenter-top">
+      <div>
+        <span id="presenter-project" class="presenter-project"></span>
+        <strong id="presenter-title"></strong>
+      </div>
+      <div class="presenter-actions">
+        <span id="presenter-kind" class="presenter-kind"></span>
+        <span id="presenter-counter"></span>
+        <button id="presenter-close" class="lightbox-close" type="button" aria-label="关闭演示">×</button>
+      </div>
+    </div>
+    <button id="presenter-prev" class="presenter-nav prev" type="button" aria-label="上一个镜头">‹</button>
+    <div id="presenter-stage" class="presenter-stage"></div>
+    <button id="presenter-next" class="presenter-nav next" type="button" aria-label="下一个镜头">›</button>
+    <div class="presenter-notes">
+      <span>内容描述</span>
+      <p id="presenter-description"></p>
+    </div>
+    <div id="presenter-strip" class="presenter-strip"></div>
   </div>
 
   <aside id="cover-panel" class="cover-panel" hidden aria-label="短视频封面工作台">
